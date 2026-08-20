@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TLC Playground — how WiFi picks its speed</title>
+<style>
+  :root{
+    --blue:#0071C5; --dark:#1F2A44; --green:#2E8B57; --orange:#E8820C;
+    --red:#C0392B; --light:#EAF3FB; --grey:#6b7280; --card:#ffffff;
+  }
+  *{box-sizing:border-box;font-family:"Segoe UI",system-ui,Arial,sans-serif;}
+  body{margin:0;background:linear-gradient(160deg,#f4f8fc,#e8eef6);color:var(--dark);}
+  header{background:var(--dark);color:#fff;padding:18px 26px;}
+  header h1{margin:0;font-size:26px;}
+  header p{margin:4px 0 0;color:#b9c6d8;font-size:14px;}
+  .wrap{display:grid;grid-template-columns:360px 1fr;gap:20px;padding:22px;max-width:1250px;margin:0 auto;}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr;}}
+  .card{background:var(--card);border-radius:14px;padding:20px;box-shadow:0 4px 14px rgba(20,40,80,.08);}
+  .card h2{margin:0 0 14px;font-size:17px;color:var(--blue);}
+  label{font-weight:600;font-size:14px;display:block;margin:16px 0 6px;}
+  .val{float:right;color:var(--blue);font-weight:700;}
+  input[type=range]{width:100%;height:6px;border-radius:5px;accent-color:var(--blue);}
+  select{width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;font-size:14px;}
+  .hint{font-size:12px;color:var(--grey);margin-top:4px;}
+  .chips{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .chip{border:2px solid var(--blue);border-radius:10px;padding:8px 6px;text-align:center;background:var(--light);}
+  .chip .k{font-size:10px;color:var(--grey);font-weight:700;text-transform:uppercase;letter-spacing:.2px;}
+  .chip .v{font-size:17px;font-weight:800;margin-top:3px;white-space:nowrap;}
+  .state{display:inline-block;padding:6px 14px;border-radius:20px;color:#fff;font-weight:700;font-size:14px;}
+  .bar-wrap{background:#eef2f7;border-radius:8px;height:26px;overflow:hidden;margin-top:6px;}
+  .bar{height:100%;background:linear-gradient(90deg,var(--blue),var(--green));width:0;
+       transition:width .3s;display:flex;align-items:center;justify-content:flex-end;
+       color:#fff;font-weight:700;font-size:13px;padding-right:8px;}
+  .ladder{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .rung{display:flex;justify-content:space-between;align-items:center;border-radius:8px;
+        padding:8px 12px;font-size:14px;border-left:6px solid var(--blue);background:#f8fafc;}
+  .rung b{font-weight:700;}
+  .rung.p{border-color:var(--blue);}   .rung.s{border-color:#2C82C9;}
+  .rung.t{border-color:var(--green);}  .rung.f{border-color:var(--orange);}
+  .rung.l{border-color:var(--red);}
+  .sr-face{font-size:40px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;}
+  .note{font-size:13px;color:var(--grey);margin-top:10px;line-height:1.5;}
+  .flags{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+  .flag{padding:6px 12px;border-radius:20px;font-size:13px;font-weight:700;border:2px solid #cbd5e1;color:var(--grey);}
+  .flag.on{background:#e7f5ec;border-color:var(--green);color:var(--green);}
+  .scen{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+  .scen button{cursor:pointer;border:1px solid var(--blue);background:#fff;color:var(--blue);
+        border-radius:20px;padding:6px 12px;font-size:13px;font-weight:600;}
+  .scen button:hover{background:var(--blue);color:#fff;}
+  .demoBtn{width:100%;margin-top:14px;cursor:pointer;border:none;border-radius:10px;
+       padding:11px;font-size:15px;font-weight:700;color:#fff;
+       background:linear-gradient(90deg,var(--green),var(--blue));}
+  .demoBtn.live{background:linear-gradient(90deg,var(--orange),var(--red));}
+  .flag{cursor:help;}
+  .tip{display:inline-block;width:16px;height:16px;border-radius:50%;background:var(--blue);
+       color:#fff;font-size:11px;font-style:italic;font-weight:700;text-align:center;line-height:16px;
+       cursor:help;margin-left:5px;position:relative;font-family:Georgia,serif;}
+  .tip .tt{position:absolute;bottom:135%;left:50%;transform:translateX(-50%) translateY(6px);
+       width:230px;background:var(--dark);color:#fff;font-size:12px;font-weight:400;line-height:1.45;
+       padding:9px 11px;border-radius:8px;opacity:0;visibility:hidden;transition:.15s;z-index:60;
+       text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.28);}
+  .tip .tt b{color:#7ec8ff;}
+  .tip .tt:after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+       border:6px solid transparent;border-top-color:var(--dark);}
+  .tip:hover .tt{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);}
+  footer{text-align:center;color:var(--grey);font-size:12px;padding:16px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎮 TLC Playground</h1>
+  <p>Success-Ratio–driven, just like the real firmware: set the channel <b>SNR (dB)</b> and watch TLC keep the fastest rate that still delivers. Success Ratio comes from <b>measured EHT PER curves</b>, not a formula.</p>
+</header>
+
+<div class="wrap">
+  <!-- Controls -->
+  <div class="card">
+    <h2>Your link conditions</h2>
+
+    <label>Channel SNR
+      <span class="tip">i<span class="tt">The <b>condition of the link</b> in dB (the cause) — not the Success Ratio itself. Each rate's measured PER curve maps this SNR to a PER, giving <b>each rate its own</b> Success Ratio (see the chart): low MCS get a high SR, high MCS a lower SR. TLC only reacts to those measured SRs. In real HW, RSSI from beacons is used only as a fallback when there are no packet stats.</span></span>
+      <span class="val" id="snrV">25 dB</span></label>
+    <input type="range" id="snr" min="-5" max="50" value="25">
+    <div class="hint">Sets the link SNR → each rate's real PER curve then gives it its own Success Ratio.</div>
+
+    <label>Interference / collisions
+      <span class="tip">i<span class="tt">Lost packets from noise/collisions. <b>More interference</b> lowers the Success Ratio at ANY speed → TLC drops to a lower MCS and switches on RTS protection.</span></span>
+      <span class="val" id="intfV">10 %</span></label>
+    <input type="range" id="intf" min="0" max="90" value="10">
+    <div class="hint">Neighbours, microwaves, busy air → packets lost regardless of speed.</div>
+
+    <label>Max bandwidth the device allows
+      <span class="tip">i<span class="tt">Upper limit on channel width TLC may pick. <b>Wider = more throughput</b>, but energy spreads thinner so each rate gets a lower Success Ratio.</span></span></label>
+    <select id="bw">
+      <option value="20">20 MHz</option>
+      <option value="40">40 MHz</option>
+      <option value="80" selected>80 MHz</option>
+      <option value="160">160 MHz</option>
+      <option value="320">320 MHz (EHT)</option>
+    </select>
+
+    <label>Antennas
+      <span class="tip">i<span class="tt">Two antennas allow <b>MIMO</b> (2 streams ≈ 2× speed) — but MIMO needs a stronger signal than single-stream SISO.</span></span></label>
+    <select id="ant">
+      <option value="2" selected>2 (MIMO possible)</option>
+      <option value="1">1 (SISO only)</option>
+    </select>
+
+    <label style="margin-top:14px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <input type="checkbox" id="psd" checked> Fixed total TX power (PSD penalty)
+      <span class="tip">i<span class="tt">Real radios transmit a <b>fixed total power</b>. A wider channel spreads it thinner — about <b>3 dB less per subcarrier for every doubling of bandwidth</b> (20 / 40 / 80 / 160 / 320 MHz = 0 / −3 / −6 / −9 / −12 dB vs 20 MHz). With this <b>ON</b>, wide BW must earn its extra reliability, so TLC drops <b>320→160→…</b> as the link weakens. OFF = idealized per-subcarrier curves, where the widest BW always wins.</span></span>
+    </label>
+
+    <button id="demo" class="demoBtn" onclick="toggleDemo()">▶ Auto-demo — sweep the SNR</button>
+
+    <h2 style="margin-top:22px;">Try a scenario</h2>
+    <div class="scen">
+        <button onclick="preset(45,5,'320','2')">🚀 Right next to router</button>
+        <button onclick="preset(30,10,'80','2')">🛋️ Same room</button>
+        <button onclick="preset(18,25,'40','2')">🚪 Next room</button>
+        <button onclick="preset(4,60,'20','1')">🏚️ Far + busy</button>
+    </div>
+    <div class="note">TLC scans every speed/width/stream combo and keeps the one with the best
+      <b>effective throughput</b> = expected speed × success ratio. That is exactly what the real
+      firmware optimises (<code>averageTpt</code>).</div>
+  </div>
+
+  <!-- Dashboard -->
+  <div>
+    <div class="card">
+      <h2>TLC's decision</h2>
+      <div class="chips">
+        <div class="chip"><div class="k">Speed (MCS)
+          <span class="tip">i<span class="tt">Modulation &amp; coding = <b>data density</b>. Picked from SNR &amp; interference. Higher MCS = faster, but needs a cleaner signal.</span></span></div>
+          <div class="v" id="mcs" style="color:var(--blue)">–</div></div>
+        <div class="chip" style="border-color:var(--green)"><div class="k">Streams
+          <span class="tip">i<span class="tt">SISO = 1 lane, <b>MIMO = 2 lanes</b> (≈2× speed). MIMO is chosen only when SNR is high enough.</span></span></div>
+          <div class="v" id="nss" style="color:var(--green)">–</div></div>
+        <div class="chip" style="border-color:var(--orange)"><div class="k">Bandwidth
+          <span class="tip">i<span class="tt">Channel width. <b>Wider ≈ more speed</b>, but power spreads thinner so it needs more SNR.</span></span></div>
+          <div class="v" id="bwv" style="color:var(--orange)">–</div></div>        <div class="chip" style="border-color:#7C3AED"><div class="k">Guard Interval
+          <span class="tip">i<span class="tt">Symbol spacing. <b>0.8&micro;s = more throughput</b>; <b>3.2&micro;s = resists echo/delay-spread</b>. TLC compares the two <b>measured PER curves</b> and keeps whichever gives the best SR&times;throughput. In this <b>AWGN</b> dataset both curves are ~identical, so it keeps 0.8&micro;s for max speed — long GI wins mainly on multipath channels.</span></span></div>
+          <div class="v" id="giv" style="color:#7C3AED">–</div></div>      </div>
+      <div class="grid2">
+        <div>
+          <label>Success Ratio
+            <span class="tip">i<span class="tt">= packets acked ÷ sent. <b>THE key metric</b> — drives up/downscale, guard interval, A-MSDU and power saving (TPC).</span></span>
+            <span class="val" id="srV"></span></label>
+          <div class="bar-wrap"><div class="bar" id="srBar"></div></div>
+          <div class="hint" id="srMsg"></div>
+        </div>
+        <div>
+          <label>Effective throughput
+            <span class="tip">i<span class="tt">= peak rate × Success Ratio. <b>TLC maximizes exactly this</b> when choosing MCS/width/streams.</span></span>
+            <span class="val" id="tptV"></span></label>
+          <div class="bar-wrap"><div class="bar" id="tptBar" style="background:linear-gradient(90deg,#2E8B57,#0071C5)"></div></div>
+          <div class="hint">out of a theoretical max shown in green→blue.</div>
+        </div>
+      </div>
+      <div style="margin-top:16px;">
+        Current mood:&nbsp; <span class="state" id="state">–</span>
+        &nbsp;<span class="sr-face" id="face"></span>
+      </div>
+      <div class="flags">
+        <span class="flag" id="fGI" title="Guard interval: 0.8µs (fast) when Success Ratio is high; 3.2µs (robust) when shaky.">Guard Interval: –</span>
+        <span class="flag" id="fAMSDU" title="Bundles packets for efficiency. Turns ON only when Success Ratio ≥ 94%.">A-MSDU bundling</span>
+        <span class="flag" id="fTPC" title="Cuts TX power to save energy. ON only at top MCS with high Success Ratio.">Power saving (TPC)</span>
+        <span class="flag" id="fRTS" title="Reserves the air to avoid collisions. ON when Success Ratio is low or when using MIMO.">RTS protection</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2>Success Ratio per MCS — what TLC actually watches
+        <span class="tip">i<span class="tt">TLC never sees SNR. It <b>measures the Success Ratio</b> of each rate (acked ÷ sent) and keeps the highest MCS whose SR × throughput is best while SR stays healthy. Bars = SR per MCS derived from each rate's <b>measured PER curve</b> at the set SNR; the dashed lines are the real decision gates (95% / 90% / 15%). Blue = TLC's pick.</span></span>
+      </h2>
+      <canvas id="snrChart" width="580" height="215" style="width:100%;"></canvas>
+      <div class="note" id="chartNote"></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h2>PER vs SNR — all MCS for the picked BW · streams · GI
+        <span class="tip">i<span class="tt">Every MCS's <b>measured</b> PER-vs-SNR curve for the selected bandwidth / streams / GI (e.g. 80&nbsp;MHz, 2SS, 0.8&micro;s → 13–14 curves). Colour = MCS (blue&nbsp;low → red&nbsp;high); the <b>bold</b> curve is TLC's pick. The dashed line is <b>your current SNR</b>; where it crosses each curve is that rate's PER. Below a curve's swept range PER saturates to 100%, above it to 0%.</span></span>
+      </h2>
+      <div style="font-size:12px;margin:-4px 0 8px;"><a href="per_model_explorer.html" target="_blank" style="color:var(--blue);font-weight:600;text-decoration:none;">↗ Open the full PER Model Explorer — clickable tabs for every column (BW · streams · GI)</a></div>
+      <canvas id="perChart" width="580" height="260" style="width:100%;"></canvas>
+      <div class="note" id="perNote"></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h2>Retry table — plan B, C, D…</h2>
+      <div class="ladder" id="ladder"></div>
+      <div class="note">If the top (fastest) rate fails for a packet, the radio instantly retries
+        further down the ladder, so data keeps flowing during a brief fade.</div>
+    </div>
+  </div>
+</div>
+
+<footer>Success-Ratio–driven educational model. Success Ratio is derived from <b>measured HE/EHT PER-vs-SNR curves</b> (canonical AWGN, 0.8µs GI, MCS 0–13) — no sigmoid. TLC decides on measured Success Ratio, not SNR directly (RSSI is only a fallback). Not a bit-exact firmware simulation.</footer>
+
+<script src="per_lut.js"></script>
+<script>
+// --- Real HE/EHT 80MHz SISO GI 0.8us effective throughput (Mbps), MCS 0..13 ---
+const BASE_TPT = [30.6,61.2,91.8,122.5,183.7,245,275.6,306.2,367.5,408.3,459.3,510.4,547,604];
+const MOD = ["BPSK 1/2","QPSK 1/2","QPSK 3/4","16QAM 1/2","16QAM 3/4","64QAM 2/3",
+             "64QAM 3/4","64QAM 5/6","256QAM 3/4","256QAM 5/6","1024QAM 3/4","1024QAM 5/6",
+             "4096QAM 3/4","4096QAM 5/6"];
+const BW_FACTOR = {20:0.25,40:0.5,80:1,160:2,320:4};
+const GI_FACTOR = 1.0, GI32_FACTOR = 0.85;    // 0.8us vs 3.2us
+const BW_REF = 20;                            // PSD penalty reference bandwidth
+function psdPenDb(bw){ const c=document.getElementById('psd'); return (c&&c.checked)? 10*Math.log10(bw/BW_REF) : 0; }
+
+// PER from the measured curve at this SNR (saturate: 100% below sweep, 0% above) — same as B2.
+function perLookup(bw,mcs,nss,gi08,snr){
+  const e = PER_LUT[bw+','+mcs+','+nss+','+(gi08?1:0)];
+  if(!e) return 1;                             // no measured curve -> rate unusable
+  const snrE = snr - psdPenDb(bw);             // fixed total power: wider BW = less per-tone SNR
+  const s=e.s, p=e.p, n=s.length;
+  if(snrE < s[0])   return 1;
+  if(snrE > s[n-1]) return 0;
+  for(let i=1;i<n;i++){ if(snrE<=s[i]){ const t=(snrE-s[i-1])/(s[i]-s[i-1]); return p[i-1]+t*(p[i]-p[i-1]); } }
+  return p[n-1];
+}
+
+function predictSR(mcs,nss,bw,gi08,snr,intf){
+  const per = perLookup(bw,mcs,nss,gi08,snr);
+  const sr = (1-per)*(1-intf/100)*100;        // measured PER + collisions -> Success Ratio
+  return Math.max(0,Math.min(99.5,sr));
+}
+function peakTpt(mcs,nss,bw,gi08){
+  return BASE_TPT[mcs]*BW_FACTOR[bw]*(nss==2?2:1)*(gi08?GI_FACTOR:GI32_FACTOR);
+}
+
+function decide(){
+  const snr = +snr_.value, intf = +intf_.value;
+  const maxBw = +bw_.value, maxNss = +ant_.value;
+  const bws = Object.keys(BW_FACTOR).map(Number).filter(b=>b<=maxBw);
+  let best=null;
+  for(const bw of bws){
+    for(let nss=maxNss; nss>=1; nss--){
+      for(let mcs=BASE_TPT.length-1; mcs>=0; mcs--){
+        for(const gi08 of [true,false]){        // GI is now part of the decision
+          const sr = predictSR(mcs,nss,bw,gi08,snr,intf);
+          const eff = peakTpt(mcs,nss,bw,gi08)*sr/100;
+          if(!best || eff>best.eff){best={mcs,nss,bw,gi08,sr,eff,peak:peakTpt(mcs,nss,bw,gi08)};}
+        }
+      }
+    }
+  }
+  render(best,snr,intf);
+}
+
+function render(b,snr,intf){
+  document.getElementById('mcs').textContent = 'MCS '+b.mcs;
+  document.getElementById('nss').textContent = b.nss==2?'MIMO (2)':'SISO (1)';
+  document.getElementById('bwv').textContent = b.bw+' MHz';
+  document.getElementById('giv').textContent = b.gi08?'0.8 \u00b5s':'3.2 \u00b5s';
+  const sr=Math.round(b.sr);
+  document.getElementById('srV').textContent = sr+' %';
+  document.getElementById('srBar').style.width = sr+'%';
+  document.getElementById('srBar').textContent = sr+'%';
+
+  const maxPossible = peakTpt(BASE_TPT.length-1,+ant_.value,+bw_.value,true);
+  document.getElementById('tptV').textContent = Math.round(b.eff)+' Mbps';
+  document.getElementById('tptBar').style.width = Math.min(100,b.eff/maxPossible*100)+'%';
+  document.getElementById('tptBar').textContent = Math.round(b.eff)+' Mbps';
+
+  // mood / state
+  let st,color,face;
+  if(sr<45){st='SEARCH (downscale!)';color='var(--red)';face='😰';}
+  else if(b.mcs>=9 && sr>=90){st='TPC (save power)';color='var(--orange)';face='😎';}
+  else if(sr>=70){st='STAY (cruising)';color='var(--green)';face='😀';}
+  else{st='SEARCH (exploring)';color='var(--blue)';face='🤔';}
+  const se=document.getElementById('state'); se.textContent=st; se.style.background=color;
+  document.getElementById('face').textContent=face;
+
+  // flags
+  flag('fGI', true, 'Guard Interval: '+(b.gi08?'0.8µs (fast)':'3.2µs (robust)'), b.gi08);
+  flag('fAMSDU', sr>=94, 'A-MSDU bundling');
+  flag('fTPC', b.mcs>=9 && sr>=90, 'Power saving (TPC)');
+  flag('fRTS', sr<88 || b.nss==2, 'RTS protection');
+
+  document.getElementById('srMsg').textContent =
+     sr>=94?'Excellent — bundling & top speed unlocked.':
+     sr>=70?'Healthy link — holding this speed.':
+     sr>=45?'Shaky — TLC keeps testing lower speeds.':
+            'Too many losses — dropping speed fast.';
+
+  // retry ladder
+  const rungs=[];
+  const label=(m,n,bw,gi)=> 'MCS '+m+' · '+(n==2?'MIMO':'SISO')+' · '+bw+'MHz · '+(gi?'0.8µs':'3.2µs');
+  rungs.push(['p','Primary (idx 0-2)', label(b.mcs,b.nss,b.bw,b.gi08), MOD[b.mcs]]);
+  if(b.mcs>=1) rungs.push(['s','Secondary (idx 3-4)', label(b.mcs-1,b.nss,b.bw,b.gi08), MOD[b.mcs-1]]);
+  if(b.mcs>=2) rungs.push(['t','Tertiary (idx 5)', label(b.mcs-2,b.nss,b.bw,b.gi08), MOD[b.mcs-2]]);
+  rungs.push(['f','Fallback (idx 6-12)', label(Math.max(0,b.mcs-3),1,b.bw,false), 'SISO / longer GI']);
+  rungs.push(['l','Legacy (idx 13-15)', 'OFDM 6–24M · 20MHz', 'most robust']);
+  const el=document.getElementById('ladder'); el.innerHTML='';
+  for(const [cls,left,mid,right] of rungs){
+    const d=document.createElement('div'); d.className='rung '+cls;
+    d.innerHTML='<b>'+left+'</b><span>'+mid+'</span><span style="color:var(--grey)">'+right+'</span>';
+    el.appendChild(d);
+  }
+  drawChart(b);
+  drawPerCurve(b);
+}
+function flag(id,on,text){const e=document.getElementById(id);e.textContent=text||e.textContent;e.classList.toggle('on',on);}
+
+// --- SR-per-MCS chart + effective-throughput curve (what TLC really optimizes) ---
+function drawChart(best){
+  const c=document.getElementById('snrChart'); if(!c) return;
+  const ctx=c.getContext('2d'); const W=c.width, H=c.height; ctx.clearRect(0,0,W,H);
+  const q=+snr_.value, intf=+intf_.value, selBw=best.bw, nss=best.nss, bestMcs=best.mcs;
+  const padL=40,padR=56,padT=22,padB=30, n=BASE_TPT.length;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const yTo=v=>padT+plotH-(v/100)*plotH;
+  // y grid + labels (0-100%)
+  ctx.font='10px Segoe UI';
+  for(let v=0; v<=100; v+=20){
+    const y=yTo(v);
+    ctx.strokeStyle='#e6ebf2'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; ctx.fillText(v,padL-6,y+3);
+  }
+  // real decision gates
+  for(const [v,col,lbl] of [[95,'#2E8B57','95%'],[90,'#0071C5','90%'],[15,'#C0392B','15%']]){
+    const y=yTo(v);
+    ctx.strokeStyle=col; ctx.lineWidth=1.4; ctx.setLineDash([5,3]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.textAlign='left'; ctx.font='bold 9px Segoe UI';
+    ctx.fillText(lbl, padL+4, y-3);
+  }
+  const bw=plotW/n;
+  // SR bars + collect effective throughput per MCS
+  let eff=[], maxEff=0;
+  for(let m=0;m<n;m++){
+    const sr=predictSR(m,nss,selBw,best.gi08,q,intf);
+    const e=peakTpt(m,nss,selBw,best.gi08)*sr/100; eff.push(e); if(e>maxEff)maxEff=e;
+    const x=padL+m*bw+2, hh=sr/100*plotH, y=padT+plotH-hh;
+    ctx.fillStyle = (m===bestMcs)?'#0071C5' : (sr>=90?'#2E8B57':(sr>=45?'#E8820C':'#e6a6a6'));
+    ctx.fillRect(x,y,bw-4,hh);
+    ctx.fillStyle='#64748b'; ctx.textAlign='center'; ctx.font='9px Segoe UI';
+    ctx.fillText(m,x+(bw-4)/2,H-16);
+  }
+  // right-axis scale = ACTUAL effective throughput (Mbps)
+  const niceMax=v=>{ if(v<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); const f=v/p; return (f<=1?1:f<=2?2:f<=5?5:10)*p; };
+  const rMax=niceMax(maxEff);
+  ctx.font='10px Segoe UI'; ctx.textAlign='left';                 // right-axis Mbps labels, aligned to the left gridlines
+  for(let v=0; v<=100; v+=20){ const y=yTo(v); ctx.fillStyle='#7C3AED'; ctx.fillText(Math.round(v/100*rMax), W-padR+6, y+3); }
+  // effective-throughput curve — actual Mbps on the right axis
+  ctx.strokeStyle='#7C3AED'; ctx.lineWidth=2.5; ctx.beginPath();
+  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yTo(eff[m]/rMax*100); m?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  ctx.stroke();
+  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yTo(eff[m]/rMax*100);
+    ctx.fillStyle=(m===bestMcs)?'#7C3AED':'#c4b5fd'; ctx.beginPath(); ctx.arc(x,y,(m===bestMcs)?5:2.5,0,7); ctx.fill();
+    if(m===bestMcs){ctx.fillStyle='#7C3AED'; ctx.font='bold 9px Segoe UI'; ctx.textAlign='center'; ctx.fillText(Math.round(eff[m])+' Mbps',x,y-8);}
+  }
+  // legend
+  ctx.textAlign='left'; ctx.font='9px Segoe UI';
+  ctx.fillStyle='#2E8B57'; ctx.fillRect(padL,5,10,8);
+  ctx.fillStyle='#475569'; ctx.fillText('Success Ratio (left)',padL+14,12);
+  ctx.strokeStyle='#7C3AED'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(padL+122,9); ctx.lineTo(padL+142,9); ctx.stroke();
+  ctx.fillStyle='#7C3AED'; ctx.beginPath(); ctx.arc(padL+132,9,3,0,7); ctx.fill();
+  ctx.fillStyle='#475569'; ctx.fillText('Effective throughput, Mbps (right)',padL+148,12);
+  // axis titles
+  ctx.fillStyle='#475569'; ctx.font='10px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('MCS 0 → 13   at '+selBw+' MHz · '+(nss==2?'MIMO':'SISO'), padL+plotW/2, H-3);
+  ctx.save(); ctx.translate(11,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#475569'; ctx.fillText('SR (%)',0,0); ctx.restore();
+  ctx.save(); ctx.translate(W-12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#7C3AED'; ctx.fillText('Throughput (Mbps)',0,0); ctx.restore();
+  document.getElementById('chartNote').textContent =
+    'TLC does NOT target a fixed SR — it picks the PEAK of the purple curve (max Success Ratio × throughput). '+
+    'Here that is MCS '+bestMcs+' at '+Math.round(predictSR(bestMcs,nss,selBw,best.gi08,q,intf))+'% SR. '+
+    'Sometimes a lower MCS at ~100% SR wins; sometimes a higher MCS at ~75% SR wins — whichever product is highest.';
+}
+
+// --- PER-vs-SNR of the picked rate: the exact measured curve TLC is using ---
+function snrAtPer(b,target){        // channel SNR (dB) where the effective curve crosses a PER target
+  const e=PER_LUT[b.bw+','+b.mcs+','+b.nss+','+(b.gi08?1:0)]; if(!e) return null;
+  const s=e.s,p=e.p, pen=psdPenDb(b.bw);
+  for(let i=1;i<s.length;i++){ if((p[i-1]-target)*(p[i]-target)<=0 && p[i-1]!==p[i]){
+    const t=(target-p[i-1])/(p[i]-p[i-1]); return +(s[i-1]+t*(s[i]-s[i-1])+pen).toFixed(1); } }
+  return null;
+}
+function drawPerCurve(b){
+  const c=document.getElementById('perChart'); if(!c) return;
+  const ctx=c.getContext('2d'); const W=c.width,H=c.height; ctx.clearRect(0,0,W,H);
+  const cur=+snr_.value; ctx.font='10px Segoe UI';
+  const padL=44,padR=14,padT=16,padB=30, plotW=W-padL-padR, plotH=H-padT-padB;
+  // every MCS curve for the picked bw / nss / gi
+  const list=[];
+  for(let m=0;m<BASE_TPT.length;m++){ const e=PER_LUT[b.bw+','+m+','+b.nss+','+(b.gi08?1:0)]; if(e) list.push({m,e}); }
+  if(!list.length){ ctx.fillStyle='#94a3b8'; ctx.textAlign='center'; ctx.fillText('No measured curves for this config.',W/2,H/2);
+          document.getElementById('perNote').textContent=''; return; }
+  let xmin=Infinity,xmax=-Infinity;
+  for(const {e} of list){ xmin=Math.min(xmin,e.s[0]); xmax=Math.max(xmax,e.s[e.s.length-1]); }
+  xmin=Math.min(xmin,cur)-2; xmax=Math.max(xmax,cur)+2;
+  const xTo=v=>padL+(v-xmin)/(xmax-xmin)*plotW;
+  const yTo=v=>padT+plotH-v*plotH;                 // PER 0..1 linear
+  for(let v=0; v<=1.0001; v+=0.25){ const y=yTo(v);
+    ctx.strokeStyle='#e6ebf2'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; ctx.fillText((v*100)+'%',padL-6,y+3); }
+  ctx.textAlign='center';
+  for(let g=Math.ceil(xmin/5)*5; g<=xmax; g+=5){ const x=xTo(g);
+    ctx.strokeStyle='#f1f4f8'; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,padT+plotH); ctx.stroke();
+    ctx.fillStyle='#94a3b8'; ctx.fillText(g,x,H-14); }
+  const mcsColor=m=>'hsl('+Math.round(210*(1-m/(BASE_TPT.length-1)))+',75%,45%)';
+  // draw each MCS curve; bold = TLC's pick
+  for(const {m} of list){
+    const picked=(m===b.mcs);
+    ctx.strokeStyle=mcsColor(m); ctx.globalAlpha=picked?1:0.5; ctx.lineWidth=picked?3:1.3;
+    ctx.beginPath();
+    for(let px=0; px<=plotW; px+=2){ const snr=xmin+(px/plotW)*(xmax-xmin);
+      const y=yTo(perLookup(b.bw,m,b.nss,b.gi08,snr)); px?ctx.lineTo(padL+px,y):ctx.moveTo(padL+px,y); }
+    ctx.stroke();
+    const xm=snrAtPer({bw:b.bw,mcs:m,nss:b.nss,gi08:b.gi08},0.5);   // label at 50% PER
+    if(xm!=null && xm>=xmin && xm<=xmax){ ctx.globalAlpha=1; ctx.fillStyle=mcsColor(m);
+      ctx.font=(picked?'bold ':'')+'9px Segoe UI'; ctx.textAlign='center'; ctx.fillText(m, xTo(xm), yTo(0.5)-3); }
+  }
+  ctx.globalAlpha=1;
+  // current SNR marker + operating point on the picked curve
+  const perNow=perLookup(b.bw,b.mcs,b.nss,b.gi08,cur), xc=xTo(cur);
+  ctx.strokeStyle='#1F2A44'; ctx.lineWidth=1.4; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(xc,padT); ctx.lineTo(xc,padT+plotH); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#1F2A44'; ctx.beginPath(); ctx.arc(xc,yTo(perNow),4.5,0,7); ctx.fill();
+  ctx.textAlign='left'; ctx.font='bold 10px Segoe UI';
+  ctx.fillText('you: '+cur+' dB', Math.min(xc+8, W-padR-64), padT+11);
+  ctx.fillStyle='#475569'; ctx.font='10px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('SNR (dB) \u2192', padL+plotW/2, H-1);
+  ctx.save(); ctx.translate(12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('PER',0,0); ctx.restore();
+  document.getElementById('perNote').textContent =
+    list.length+' MCS curves for '+b.bw+' MHz \u00b7 '+(b.nss==2?'MIMO':'SISO')+' \u00b7 '+(b.gi08?'0.8\u00b5s':'3.2\u00b5s')+' GI (AWGN, LDPC). '+
+    'Numbers label each MCS at its 50% PER point; bold = TLC pick (MCS '+b.mcs+'). '+
+    'At '+cur+' dB the pick sits at PER '+(perNow*100).toFixed(perNow<0.1?1:0)+'%.';
+}
+
+const snr_=document.getElementById('snr'), intf_=document.getElementById('intf'),
+      bw_=document.getElementById('bw'), ant_=document.getElementById('ant');
+function upd(){document.getElementById('snrV').textContent=snr_.value+' dB';
+  document.getElementById('intfV').textContent=intf_.value+' %';decide();}
+[snr_,intf_,bw_,ant_].forEach(e=>e.addEventListener('input',upd));
+const psd_=document.getElementById('psd'); if(psd_) psd_.addEventListener('change',upd);
+function preset(s,i,bw,ant){snr_.value=s;intf_.value=i;bw_.value=bw;ant_.value=ant;upd();}
+
+// --- Auto-demo: sweep channel SNR up and down so you can watch the "gears" shift ---
+let demoTimer=null, demoDir=1;
+function toggleDemo(){
+  const b=document.getElementById('demo');
+  if(demoTimer){clearInterval(demoTimer);demoTimer=null;
+    b.textContent='\u25b6 Auto-demo \u2014 sweep the SNR'; b.classList.remove('live'); return;}
+  b.textContent='\u23f8 Stop auto-demo'; b.classList.add('live');
+  demoTimer=setInterval(()=>{
+    let v=+snr_.value+demoDir*1.5;
+    if(v>=50){v=50;demoDir=-1;}
+    if(v<=-5){v=-5;demoDir=1;}
+    snr_.value=v; upd();
+  },130);
+}
+upd();
+</script>
+</body>
+</html>

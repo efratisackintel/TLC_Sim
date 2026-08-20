@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../FWCode/wcd_fw-dev"
+		},
+		{
+			"path": "../FWCode/wifi_drv-dev"
+		}
+	],
+	"settings": {}
+}

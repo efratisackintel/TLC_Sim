@@ -1,0 +1,17 @@
+# Python virtual environment & caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Large redundant archive (exceeds GitHub's 100 MB per-file limit;
+# the same data lives unzipped in PERModel/WiFi_EHT_Extended_HVT/)
+PERModel/WiFi_EHT_Extended_HVT.zip
+
+# Raw measured .fig dataset (~135 MB of binary source figures)
+PERModel/WiFi_EHT_Extended_HVT/
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
