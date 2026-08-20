@@ -12,7 +12,7 @@ The rate picker is chosen to maximize **effective throughput = peak_rate × Succ
 &nbsp;
 [![Open PER Explorer](https://img.shields.io/badge/%E2%96%B6%20Open-PER%20Model%20Explorer-7C3AED?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/per_model_explorer.html)
 
-> The buttons open the **live** interactive pages on GitHub Pages, which is **auto‑deployed** by the workflow in `.github/workflows/deploy-pages.yml` on every push to `main`. The first deploy takes ~1–2 minutes after the initial push; after that the links just work. (Opening the `.html` files directly on github.com only shows source, not the live page.)
+> The buttons open the **live** interactive pages on **GitHub Pages**. Enable it once (one‑time toggle): repo **Settings → Pages → Build and deployment → Source: _Deploy from a branch_ → Branch: `main` / `/ (root)` → Save**. After ~1 minute the site is live at `https://efratisackintel.github.io/TLC_Sim/` and rebuilds automatically on every push. (Opening the `.html` files directly on github.com only shows source, not the live page.)
 
 **What each one is:**
 - **▶ Playground** ([doc/tlc_playground.html](doc/tlc_playground.html)) — set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI. All‑MCS PER‑vs‑SNR chart, fixed‑total‑power (PSD) penalty toggle, effective‑throughput (Mbps) axis.
