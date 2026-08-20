@@ -179,11 +179,11 @@
       <div class="note" id="chartNote"></div>
     </div>
     <div class="card" style="margin-top:20px;">
-      <h2>PER vs SNR — all MCS for the picked BW · streams · GI
-        <span class="tip">i<span class="tt">Every MCS's <b>measured</b> PER-vs-SNR curve for the selected bandwidth / streams / GI (e.g. 80&nbsp;MHz, 2SS, 0.8&micro;s → 13–14 curves). Colour = MCS (blue&nbsp;low → red&nbsp;high); the <b>bold</b> curve is TLC's pick. The dashed line is <b>your current SNR</b>; where it crosses each curve is that rate's PER. Below a curve's swept range PER saturates to 100%, above it to 0%.</span></span>
+      <h2>PER vs SNR — <span id="perTitleCfg">picked curve</span>
+        <span class="tip">i<span class="tt">Every MCS's <b>measured</b> PER-vs-SNR curve for the picked bandwidth / streams / GI (SISO = 1&times;2, MIMO = 2&times;2). Colour = MCS (blue&nbsp;low → red&nbsp;high); the <b>bold</b> curve is TLC's pick. The dashed line is <b>your current SNR</b>; where it crosses each curve is that rate's PER. Below a curve's swept range PER saturates to 100%, above it to 0%.</span></span>
       </h2>
       <div style="font-size:12px;margin:-4px 0 8px;"><a href="per_model_explorer.html" target="_blank" style="color:var(--blue);font-weight:600;text-decoration:none;">↗ Open the full PER Model Explorer — clickable tabs for every column (BW · streams · GI)</a></div>
-      <canvas id="perChart" width="580" height="260" style="width:100%;"></canvas>
+      <canvas id="perChart" width="580" height="190" style="width:100%;"></canvas>
       <div class="note" id="perNote"></div>
     </div>
     <div class="card" style="margin-top:20px;">
@@ -339,16 +339,16 @@ function drawChart(best){
     ctx.fillStyle='#64748b'; ctx.textAlign='center'; ctx.font='9px Segoe UI';
     ctx.fillText(m,x+(bw-4)/2,H-16);
   }
-  // right-axis scale = ACTUAL effective throughput (Mbps)
-  const niceMax=v=>{ if(v<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); const f=v/p; return (f<=1?1:f<=2?2:f<=5?5:10)*p; };
-  const rMax=niceMax(maxEff);
-  ctx.font='10px Segoe UI'; ctx.textAlign='left';                 // right-axis Mbps labels, aligned to the left gridlines
-  for(let v=0; v<=100; v+=20){ const y=yTo(v); ctx.fillStyle='#7C3AED'; ctx.fillText(Math.round(v/100*rMax), W-padR+6, y+3); }
+  // right-axis scale = ACTUAL effective throughput (Mbps), fixed 0..4500
+  const rMax=4500;
+  ctx.font='10px Segoe UI'; ctx.textAlign='left'; ctx.fillStyle='#7C3AED';        // right-axis Mbps labels (0..4500 step 500)
+  for(let v=0; v<=rMax; v+=500){ const y=yTo(v/rMax*100); ctx.fillText(v, W-padR+6, y+3); }
+  const yR=v=>yTo(Math.min(v,rMax)/rMax*100);
   // effective-throughput curve — actual Mbps on the right axis
   ctx.strokeStyle='#7C3AED'; ctx.lineWidth=2.5; ctx.beginPath();
-  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yTo(eff[m]/rMax*100); m?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yR(eff[m]); m?ctx.lineTo(x,y):ctx.moveTo(x,y); }
   ctx.stroke();
-  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yTo(eff[m]/rMax*100);
+  for(let m=0;m<n;m++){ const x=padL+m*bw+2+(bw-4)/2, y=yR(eff[m]);
     ctx.fillStyle=(m===bestMcs)?'#7C3AED':'#c4b5fd'; ctx.beginPath(); ctx.arc(x,y,(m===bestMcs)?5:2.5,0,7); ctx.fill();
     if(m===bestMcs){ctx.fillStyle='#7C3AED'; ctx.font='bold 9px Segoe UI'; ctx.textAlign='center'; ctx.fillText(Math.round(eff[m])+' Mbps',x,y-8);}
   }
@@ -424,8 +424,11 @@ function drawPerCurve(b){
   ctx.fillStyle='#475569'; ctx.font='10px Segoe UI'; ctx.textAlign='center';
   ctx.fillText('SNR (dB) \u2192', padL+plotW/2, H-1);
   ctx.save(); ctx.translate(12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('PER',0,0); ctx.restore();
+  const antTxt = b.nss==2?'MIMO 2x2':'SISO 1x2';
+  document.getElementById('perTitleCfg').textContent =
+    'EHT \u00b7 '+b.bw+' MHz \u00b7 SU \u00b7 '+antTxt+' \u00b7 '+(b.gi08?'0.8\u00b5s':'3.2\u00b5s')+' GI';
   document.getElementById('perNote').textContent =
-    list.length+' MCS curves for '+b.bw+' MHz \u00b7 '+(b.nss==2?'MIMO':'SISO')+' \u00b7 '+(b.gi08?'0.8\u00b5s':'3.2\u00b5s')+' GI (AWGN, LDPC). '+
+    list.length+' MCS curves \u2014 EHT, '+b.bw+' MHz, SU, '+antTxt+', '+(b.gi08?'0.8\u00b5s':'3.2\u00b5s')+' GI (AWGN, LDPC). '+
     'Numbers label each MCS at its 50% PER point; bold = TLC pick (MCS '+b.mcs+'). '+
     'At '+cur+' dB the pick sits at PER '+(perNow*100).toFixed(perNow<0.1?1:0)+'%.';
 }

@@ -26,9 +26,9 @@ from fig_to_xlsx import extract_curves, clean_name, parse_config
 FIG_DIR = "WiFi_EHT_Extended_HVT/WiFi_EHT_Extended_HVT"
 OUT = "../tlcsim/data/per_lut.npz"
 
-# gi08 -> (GI us, LTF); nss -> antenna
+# gi08 -> (GI us, LTF); nss -> antenna (SISO uses 1x2 = 2-RX diversity, MIMO uses 2x2)
 GI_LTF = {True: (0.8, 2), False: (3.2, 4)}
-NSS_ANT = {1: "1x1", 2: "2x2"}
+NSS_ANT = {1: "1x2", 2: "2x2"}
 
 
 def _snr_sens(cleaned: str):
