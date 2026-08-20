@@ -4,13 +4,20 @@ A small, self‑contained Python simulation of the WiFi firmware **Transmit‑Li
 
 The rate picker is chosen to maximize **effective throughput = peak_rate × Success‑Ratio**, exactly like the real Rate‑Scale Manager, and the PER model that feeds it comes entirely from measured firmware curves (no analytic sigmoid).
 
-## Interactive docs (open the HTML files in a browser)
+## ▶ Open the interactive docs
 
-> These are standalone HTML. Clone the repo and open them locally, or enable **GitHub Pages** (Settings → Pages → deploy from `main`/`root`) to view them live at `https://efratisackintel.github.io/TLC_Sim/doc/<file>.html`.
+[![Open Playground](https://img.shields.io/badge/%E2%96%B6%20Open-Playground-0071C5?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/tlc_playground.html)
+&nbsp;
+[![Open Architecture](https://img.shields.io/badge/%E2%96%B6%20Open-Interactive%20Architecture-2E8B57?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/tlc_sim_architecture.html)
+&nbsp;
+[![Open PER Explorer](https://img.shields.io/badge/%E2%96%B6%20Open-PER%20Model%20Explorer-7C3AED?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/per_model_explorer.html)
 
-- **Playground** — [`doc/tlc_playground.html`](doc/tlc_playground.html): set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI. Includes the all‑MCS PER‑vs‑SNR chart, a fixed‑total‑power (PSD) penalty toggle, and an effective‑throughput (Mbps) axis.
-- **Interactive architecture** — [`doc/tlc_sim_architecture.html`](doc/tlc_sim_architecture.html): click blocks B1–B6 for inputs/outputs, flow diagrams, and (under **B2**) the integrated **PER Model Explorer** (tabs for frame BW · channel BW · antenna · GI).
-- **PER Model Explorer (standalone)** — [`doc/per_model_explorer.html`](doc/per_model_explorer.html): every measured PER curve, per permutation, with a log‑axis toggle and CSV export.
+> The buttons open the **live** interactive pages on GitHub Pages, which is **auto‑deployed** by the workflow in `.github/workflows/deploy-pages.yml` on every push to `main`. The first deploy takes ~1–2 minutes after the initial push; after that the links just work. (Opening the `.html` files directly on github.com only shows source, not the live page.)
+
+**What each one is:**
+- **▶ Playground** ([doc/tlc_playground.html](doc/tlc_playground.html)) — set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI. All‑MCS PER‑vs‑SNR chart, fixed‑total‑power (PSD) penalty toggle, effective‑throughput (Mbps) axis.
+- **▶ Interactive architecture** ([doc/tlc_sim_architecture.html](doc/tlc_sim_architecture.html)) — click blocks B1–B6 for I/O and flow diagrams; the integrated **PER Model Explorer** lives under **B2** (tabs for frame BW · channel BW · antenna · GI).
+- **▶ PER Model Explorer** ([doc/per_model_explorer.html](doc/per_model_explorer.html)) — every measured PER curve, per permutation, with a log‑axis toggle and CSV export.
 
 ## Quick start
 
