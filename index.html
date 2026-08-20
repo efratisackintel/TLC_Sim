@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLC_Sim — WiFi Firmware TLC Simulation</title>
+<style>
+  :root{--blue:#0071C5;--dark:#1F2A44;--green:#2E8B57;--purple:#7C3AED;--grey:#6b7280;}
+  *{box-sizing:border-box;font-family:"Segoe UI",system-ui,Arial,sans-serif;}
+  body{margin:0;min-height:100vh;background:linear-gradient(160deg,#f4f8fc,#e8eef6);color:var(--dark);
+       display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;}
+  h1{font-size:30px;margin:0 0 6px;}
+  p.sub{color:var(--grey);font-size:16px;margin:0 0 28px;text-align:center;max-width:640px;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;max-width:860px;width:100%;}
+  a.card{display:block;text-decoration:none;color:inherit;background:#fff;border-radius:14px;padding:22px;
+         box-shadow:0 4px 14px rgba(20,40,80,.10);border-top:5px solid var(--blue);transition:.15s;}
+  a.card:hover{transform:translateY(-3px);box-shadow:0 8px 22px rgba(20,40,80,.16);}
+  a.card.g{border-top-color:var(--green);} a.card.p{border-top-color:var(--purple);}
+  a.card h2{margin:0 0 8px;font-size:18px;color:var(--blue);}
+  a.card.g h2{color:var(--green);} a.card.p h2{color:var(--purple);}
+  a.card span{font-size:13.5px;color:var(--grey);line-height:1.5;}
+  .foot{margin-top:26px;font-size:13px;color:var(--grey);}
+  .foot a{color:var(--blue);text-decoration:none;}
+</style>
+</head>
+<body>
+  <h1>📡 TLC_Sim</h1>
+  <p class="sub">WiFi firmware <b>Transmit‑Link‑Control (rate‑scaling)</b> simulation with a data‑driven PER model and interactive teaching docs.</p>
+  <div class="cards">
+    <a class="card" href="doc/tlc_playground.html">
+      <h2>▶ Playground</h2>
+      <span>Set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI. All‑MCS PER chart, PSD‑penalty toggle, throughput axis.</span>
+    </a>
+    <a class="card g" href="doc/tlc_sim_architecture.html">
+      <h2>▶ Interactive Architecture</h2>
+      <span>Click blocks B1–B6 for inputs/outputs and flow diagrams. The PER Model Explorer is integrated under B2.</span>
+    </a>
+    <a class="card p" href="doc/per_model_explorer.html">
+      <h2>▶ PER Model Explorer</h2>
+      <span>Every measured PER‑vs‑SNR curve, per permutation (frame BW · channel BW · antenna · GI). Log axis + CSV export.</span>
+    </a>
+  </div>
+  <p class="foot"><a href="https://github.com/efratisackintel/TLC_Sim">Source on GitHub →</a></p>
+</body>
+</html>
