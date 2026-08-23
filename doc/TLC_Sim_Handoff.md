@@ -2,7 +2,7 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-08-19.
+> Last updated: 2026-08-23.
 
 ---
 
@@ -28,6 +28,8 @@ c:\Users\eisack\OneDrive - Intel Corporation\Desktop\Efrat\TLC_Sim\
 - Inputs are per-rate **success/failure frame counts** → success ratio (SR), tracked with EWMA windows per (column, MCS).
 - **RSSI is only a fallback** (used in `_rsMngHandleBeaconData` when there are no TX stats yet). SNR is *not* a TLC input.
 - Outputs: **primary rate (PR)**, **bandwidth (BW)**, **guard interval (GI)**, **NSS**, and a **retry table** (primary + fallbacks + legacy).
+
+> Sim caveat: because there is no real radio, the sim/playground **synthesizes** the SR feedback from measured **PER-vs-SNR** curves (B2) at the channel SNR. So the channel input is SNR, but the TLC decision is still made on the resulting Success Ratio — faithful to the FW's SR-driven objective.
 
 ---
 
@@ -90,6 +92,18 @@ else: return FALSE
 - Legacy 480/160 limits when in a legacy column.
 - The 10 s-ish stat-reset/flush behaviour.
 
+### 3.4 FW telemetry mapping (uSniffer `sub_usniffer_ratescale.h` / `usniffer_globals.yaml`)
+
+The real algorithm is **`RS_MNG` (Rate-Scale Manager, a.k.a. TLC)**, per-station in UMAC. Its uSniffer contracts confirm the design and give the exact vocabulary the sim mimics:
+
+- **Search-cycle start reasons** (`searchCycleParams.startReason`) — the *only* four triggers, matching the sim's SUCCESS/GUARD/FAIL logic:
+  1. `succeeded_frames_time` (time gate) · 2. `succeeded_frames` (count) · 3. `flush_time` (periodic stats flush) · 4. `failed_frames_threshold` (immediate).
+  The sim implements 1/2/4; #3 (flush) is not modelled.
+- **Scale action** (`USNIFFER_EVT_RS_MNG_SCALE_ACTION_S`): compares `currTpt` vs one-step-`lower`/`higher` rate TPT + `currSuccessRatio` → `STAY/UPSCALE/DOWNSCALE` with a reason (`higher_rate_has_higher_tpt`, `current_rate_has_highest_tpt`, `below_force_decrease_threshold`, …). Objective is **expected aggregated (airtime) throughput**, from real BlockAck `txed/acked`, NOT a PER-vs-SNR curve.
+- **Columns** (`visitedColumns`, 22): `non_ht_ant_a/b`, `siso_ant_a/b`, `siso_stbc`, `mimo`, and HE GI variants `he_{0_8,1_6,3_2}_{siso,mimo}` (+`_sgi`). Each SC keeps a **stable** column and probes a **test** column (`searchColParams.decision = REVERT_TO_STABLE_COL | SWITCH_TO_TEST_COL`).
+- **Power cap** (`USNIFFER_EVT_RS_MNG_POWER_CAP_S`): MIMO/SISO `maxPower`/`powerCap`, `forceSiso` — the real analogue of the playground's PSD penalty (driven by SAR/TAS/regulatory, not a formula).
+- Note: the RS_MNG *decision source* is not in the `wcd_fw-dev` view here — only its telemetry/config structs and `tlcContext::LQCmdParams` are.
+
 ---
 
 ## 4. The simulation package `tlcsim/` (6 blocks, one file per block)
@@ -99,14 +113,14 @@ Pure stdlib; matplotlib only used by the GUI.
 
 | Block | File | Role |
 |---|---|---|
-| B1 | `channel.py` | Time-varying channel (quality + collision). `Channel(segments)`, `.state(t_ms)`, `.from_config()`; `Seg{ms,quality,quality_end?,collision}` supports constant or linear ramp. |
-| B2 | `per_model.py` | Pure `per(rate, ch, slope=0.16)`: `margin=quality-required_quality(rate)`; `p_link=sigmoid(margin*slope)`; `p_success=p_link*(1-collision)`; `PER=1-p_success`. |
+| B1 | `channel.py` | Time-varying channel (**SNR dB** + collision). `ChannelState(snr_db, collision)`, `Seg{ms, snr_db, snr_end?, collision}` supports constant or linear ramp. `SNR_MIN=-20`, `SNR_MAX=60`. |
+| B2 | `per_model.py` | **Data-driven** PER — NO sigmoid. `per(rate, ch)` / `phy_per(rate, snr_db)` interpolate the measured EHT PER-vs-SNR curve for the rate, saturating to 1.0 below / 0.0 above the swept range; then `PER = 1-(1-PER_phy)(1-collision)`. Loads `tlcsim/data/per_lut.npz`. Also `sens_snr(rate)` (SNR@10% PER), `has_rate(rate)`, `lut_keys()`. |
 | B3 | `emulator.py` | LMAC+PHY surrogate. `simulate_window(rate_table, ch, window_frames, monte_carlo, rng)` → `WindowStats{txed,acked,sr}`. Coarse `acked=round(N*(1-per))` or Monte-Carlo draws. |
 | B4 | `tlc.py` | **The rate picker under test** (swap point). `ReferenceTLC` = column-based state machine. See §5. |
 | B5 | `results.py` | `Record`, `RunResult.to_csv()`, `.summary()` (ASCII-safe KPIs). |
 | B6 | `harness.py` | `run_sim(channel, tlc, config, frame_bytes, monte_carlo, seed, max_ms)` — closed loop + simulated clock. |
 
-`rates.py` — `Rate{mcs,nss,bw,gi08}`; tables `BASE_TPT` (HE/EHT 80 MHz SISO 0.8µs MCS0-13 Mbps), `MCS_Q`, `BW_FACTOR`, `BW_PENALTY`, `NSS_PENALTY=5`, `GI08=1.0/GI32=0.85`, `BANDWIDTHS=[20,40,80,160,320]`; funcs `expected_tpt(r)`, `required_quality(r)`, `all_rates()`.
+`rates.py` — `Rate{mcs,nss,bw,gi08}`; tables `BASE_TPT` (HE/EHT 80 MHz SISO 0.8µs MCS0-13 Mbps), `BW_FACTOR`, `GI08=1.0/GI32=0.85`, `BANDWIDTHS=[20,40,80,160,320]`; funcs `expected_tpt(r)`, `sens_snr(r)`, `all_rates()` (restricted to the LUT keys). **`MCS_Q`/`required_quality`/`BW_PENALTY`/`NSS_PENALTY` were removed** in the data-driven rework.
 
 `scenarios.py` — `steady()`, `fade_and_recover(good=90,bad=20,seg_ms=3000)`, `sudden_drop()`, `interference_burst()`, `SCENARIOS` dict.
 
@@ -135,7 +149,7 @@ Pure stdlib; matplotlib only used by the GUI.
 - **SEARCH**: score neighbour columns by `SR × expected_tpt`, keep best, settle back to STAY (set `last_reason=pending_reason`, `last_search_end_ms=t`).
 - Helpers: `_rate()`, `_avgtpt()`, `_neighbours()` (toggle SISO/MIMO, ±BW step, toggle GI), `_retry_table()` (primary + 3 lower MCS + legacy `Rate(0,1,20,False)`), `_lq()`, `_enter_search(sr)`.
 
-Validated: `fade_and_recover` 9 s → efficiency ~0.69–0.74, avg_tpt ~1268–1382 Mbps, climbs to MCS13·MIMO·160 on good channel, tracks fades; ~92 search cycles with the faithful trigger.
+Validated: `fade_and_recover` / `run_example.py` → efficiency ~0.81 with the data-driven PER; climbs to high MCS·MIMO·wide-BW on a good channel and tracks fades; many short search cycles with the faithful count/guard trigger (emergent, no fixed timer).
 
 ---
 
@@ -156,13 +170,15 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 
 | File | What |
 |---|---|
-| `tlc_sim_architecture.html` | **Interactive** architecture page (main teaching artefact). Clickable B1–B6 blocks, per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow diagram, "Simple example" mini-graph). Standalone cards: **"Search cycle over time"** timeline, **"When does a SEARCH cycle start? — the condition, made simple"** (two-lane decision graphic: failure=immediate, success=300 ms gate), **"Block summary"** table. |
+| `tlc_playground.html` | **Primary interactive artefact.** Three tabs (tab bar `.ptabbar` / `showTab()`, deep-linkable via `#live`/`#scenario`/`#doc`): **🎛 Live decision** (SNR slider → chosen MCS/streams/BW/GI, all-MCS PER-vs-SNR chart, PSD-penalty toggle, Mbps axis; **Max BW defaults to 320 MHz, Antennas to 2/MIMO**), **📈 Simulation** (closed-loop scenario over time: 4 charts — throughput, MCS+SNR, BW+SNR, streams+SNR — SEARCH bands numbered, search-cycle log with chosen PR, KPIs incl. **time between SC** and **SC duration**), **🏗 Architecture** (embeds the architecture doc via a right-sized full-width `<iframe>`; footer hidden on this tab). |
+| `tlc_sim_architecture_old.html` | The interactive architecture page (**renamed from `tlc_sim_architecture.html`**; now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). |
+| `per_model_explorer.html` | Standalone PER explorer — every measured PER curve per permutation, log-axis toggle, SNR marker, CSV export. |
 | `TLC_Sim_Plan.md` | Implementation plan (recommends binding real C `rateScaleMng` via USFSTL for true fidelity; two time regimes; simulated clock; phases; KPIs). |
 | `TLC_Hierarchy.docx` | Word doc: TLC hierarchy, inputs/outputs, refresh rates, typical values, configs, TOC. |
 | `TLC_ForDummies.pptx` | Simple slide deck. |
-| `tlc_playground.html` | SR-driven interactive playground (behaves per SR, not SNR). |
 | `build_*.py` + `assets/` | Generators for the docx/pptx/playground. **Run them from inside `doc/`** (they look for `<script_dir>/assets`). |
 | `TLC_Hierarchy.md` (at TLC_Sim root) | Original hierarchy markdown. |
+| `index.html` (at TLC_Sim root) | Landing page with 3 cards → Playground / Architecture (`#doc`) / PER Explorer. |
 
 ---
 
@@ -176,7 +192,7 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
   ```powershell
   Set-Location "c:\Users\eisack\OneDrive - Intel Corporation\Desktop\Efrat\TLC_Sim"
   Start-Process python -ArgumentList "gui.py"
-  Start-Process "doc\tlc_sim_architecture.html"
+  Start-Process "doc\tlc_playground.html"
   ```
 
 ---
@@ -188,16 +204,19 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - Search cycles "random/almost transparent" (181 searches) → added real firmware trigger; GUI now uses bold amber `axvline` + state shading.
 - `summary()` Unicode crash under redirect → ASCII-safe.
 - Confirmed (twice, from source) TLC has **no periodic search timer** and is **SR-driven, not SNR**.
+- **Data-driven PER rework** (this session's baseline): removed the analytic sigmoid entirely; B2 now interpolates measured EHT curves. SISO→`1x2` antenna, MIMO→`2x2` antenna mapping. `run_example.py` efficiency ~0.81.
+- **Playground merge (2026-08-23)**: architecture doc merged into the playground as the **🏗 Architecture** iframe tab; renamed the standalone to `_old`; added left POC nav; removed the middle B1–B6 tab row; Simulation tab KPIs gained **time between SC** / **SC duration**; **default Max BW = 320 MHz**.
+- **Double-scrollbar / narrow-iframe fixes**: doc panel must NOT reuse the `.wrap` class (it's a CSS grid → forced the iframe into a 360 px column); iframe height computed from its live top; footer hidden on the doc tab.
 
 ---
 
 ## 10. Open ideas / likely next requests
 
-- Expose `SUCCESS_LIMIT` / `FAIL_LIMIT` / search-interval as **GUI sliders**.
+- Expose `SUCCESS_LIMIT` / `FAIL_LIMIT` / search-interval as **GUI sliders** (and in the playground Simulation tab, to reduce the many SCs on a healthy link).
 - Switch clock to **offered-load (Mbps) model** so dwell wall-time is realistic (~500 ms) and ms-timers behave (currently window time = frame-count × airtime → dwell is short at high PHY rates).
 - **Bind the real C `rateScaleMng`** into `run_sim` via USFSTL for true fidelity (per `TLC_Sim_Plan.md`).
 - Model the not-yet-modelled firmware behaviour from §3.3 (200 ms upscale guard, legacy limits, 10 s stat flush, faster BW recovery / jump-to-best-BW).
-- Annotate GUI decision plot with NSS/BW/GI (column) changes, not just MCS.
+- Annotate GUI decision plot with NSS/BW/GI (column) changes, not just MCS. *(Done in the browser Simulation tab — separate MCS / BW / streams charts; still open for the Tkinter GUI.)*
 - Add an explicit "no periodic timer — count-driven; 300 ms only rate-limits success searches" note on the HTML condition graphic.
 - Clean up the dead unused `B4FLOW` const still present in the HTML (harmless).
 

@@ -8,15 +8,15 @@ The rate picker is chosen to maximize **effective throughput = peak_rate × Succ
 
 [![Open Playground](https://img.shields.io/badge/%E2%96%B6%20Open-Playground-0071C5?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/tlc_playground.html)
 &nbsp;
-[![Open Architecture](https://img.shields.io/badge/%E2%96%B6%20Open-Interactive%20Architecture-2E8B57?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/tlc_sim_architecture.html)
+[![Open Architecture](https://img.shields.io/badge/%E2%96%B6%20Open-Interactive%20Architecture-2E8B57?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/tlc_playground.html#doc)
 &nbsp;
 [![Open PER Explorer](https://img.shields.io/badge/%E2%96%B6%20Open-PER%20Model%20Explorer-7C3AED?style=for-the-badge&logo=googlechrome&logoColor=white)](https://efratisackintel.github.io/TLC_Sim/doc/per_model_explorer.html)
 
 > The buttons open the **live** interactive pages on **GitHub Pages**. Enable it once (one‑time toggle): repo **Settings → Pages → Build and deployment → Source: _Deploy from a branch_ → Branch: `main` / `/ (root)` → Save**. After ~1 minute the site is live at `https://efratisackintel.github.io/TLC_Sim/` and rebuilds automatically on every push. (Opening the `.html` files directly on github.com only shows source, not the live page.)
 
 **What each one is:**
-- **▶ Playground** ([doc/tlc_playground.html](doc/tlc_playground.html)) — set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI. All‑MCS PER‑vs‑SNR chart, fixed‑total‑power (PSD) penalty toggle, effective‑throughput (Mbps) axis.
-- **▶ Interactive architecture** ([doc/tlc_sim_architecture.html](doc/tlc_sim_architecture.html)) — click blocks B1–B6 for I/O and flow diagrams; the integrated **PER Model Explorer** lives under **B2** (tabs for frame BW · channel BW · antenna · GI).
+- **▶ Playground** ([doc/tlc_playground.html](doc/tlc_playground.html)) — three tabs: **Live decision** (set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI; all‑MCS PER‑vs‑SNR chart, fixed‑total‑power (PSD) penalty toggle, Mbps axis; Max BW defaults to **320 MHz**, MIMO), **Simulation** (closed‑loop scenario over time — throughput / MCS / BW / streams charts, numbered SEARCH bands, search‑cycle log, KPIs incl. *time between SC* and *SC duration*), and **Architecture** (the interactive block diagram embedded).
+- **▶ Interactive architecture** ([doc/tlc_playground.html#doc](doc/tlc_playground.html#doc)) — click blocks B1–B6 for I/O and flow diagrams; the integrated **PER Model Explorer** lives under **B2** (tabs for frame BW · channel BW · antenna · GI). Standalone copy kept at `doc/tlc_sim_architecture_old.html`.
 - **▶ PER Model Explorer** ([doc/per_model_explorer.html](doc/per_model_explorer.html)) — every measured PER curve, per permutation, with a log‑axis toggle and CSV export.
 
 ## Quick start

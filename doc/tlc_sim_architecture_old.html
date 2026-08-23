@@ -68,6 +68,15 @@
   table.exsens{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px;}
   table.exsens th,table.exsens td{border:1px solid #e2e8f0;padding:4px 7px;text-align:center;}
   table.exsens th{background:#f1f5f9;color:var(--dark);}
+  /* --- left POC / table of contents --- */
+  #poc{position:fixed;left:12px;top:90px;width:158px;z-index:60;display:flex;flex-direction:column;gap:6px;}
+  #poc .pochdr{font-size:10px;font-weight:800;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;margin:0 0 2px 2px;}
+  #poc a{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--grey);background:#fff;border:1.5px solid #cbd5e1;border-radius:8px;padding:7px 10px;text-decoration:none;line-height:1.15;}
+  #poc a small{display:block;font-size:10px;font-weight:600;color:#94a3b8;margin-top:1px;}
+  #poc a:hover{border-color:var(--blue);}
+  #poc a.active{background:var(--blue);color:#fff;border-color:transparent;}
+  #poc a.active small{color:#dbeafe;}
+  @media(max-width:1460px){#poc{display:none;}}
 </style>
 </head>
 <body>
@@ -75,6 +84,17 @@
   <h1>TLC Simulation — Interactive Architecture</h1>
   <p>Click any block (B1–B6) for its inputs/outputs, functions, and a schematic <b>flow diagram</b> of what it does. Built from the real <span class="file">tlcsim/</span> code.</p>
 </header>
+
+<nav id="poc">
+  <div class="pochdr">Contents</div>
+  <a data-poc="TOP" onclick="pocGo('TOP')" title="Block diagram overview">0 · High level</a>
+  <a data-poc="B1" onclick="pocGo('B1')" title="Channel Configuration">1 · B1<small>Channel</small></a>
+  <a data-poc="B2" onclick="pocGo('B2')" title="PER Model">2 · B2<small>PER Model</small></a>
+  <a data-poc="B3" onclick="pocGo('B3')" title="TX / Statistics Emulator">3 · B3<small>TX Emulator</small></a>
+  <a data-poc="B4" onclick="pocGo('B4')" title="TLC (Rate Scale Manager)">4 · B4<small>TLC</small></a>
+  <a data-poc="B5" onclick="pocGo('B5')" title="Statistics Memory &amp; History">5 · B5<small>Stats Memory</small></a>
+  <a data-poc="B6" onclick="pocGo('B6')" title="Harness / Scheduler">6 · B6<small>Harness</small></a>
+</nav>
 
 <div class="wrap">
 
@@ -156,7 +176,6 @@
   </div>
 
   <div class="card">
-    <div class="tabs" id="tabs"></div>
     <div id="detail"></div>
   </div>
 
@@ -570,6 +589,7 @@ function show(id){
     t.style.background=on?COLOR[t.dataset.id]:'#fff';
     t.style.color=on?'#fff':'#6b7280';
   });
+  document.querySelectorAll('#poc a').forEach(a=>a.classList.toggle('active',a.dataset.poc===id));
   document.getElementById('detail').innerHTML =
     `<h2 style="color:${c}">${TITLE[id]}</h2>
      <p class="role">${d.role}</p>
@@ -583,11 +603,11 @@ function show(id){
   const csc=document.getElementById('card_searchCond'); if(csc) csc.style.display = id==='B4'?'':'none';
 }
 
-const tabs=document.getElementById('tabs');
-['B1','B2','B3','B4','B5','B6'].forEach(id=>{
-  const b=document.createElement('div'); b.className='tab'; b.dataset.id=id;
-  b.textContent=TITLE[id]; b.onclick=()=>show(id); tabs.appendChild(b);
-});
+function pocGo(id){
+  if(id==='TOP'){ document.querySelectorAll('#poc a').forEach(a=>a.classList.toggle('active',a.dataset.poc==='TOP')); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  show(id);
+  document.getElementById('detail').scrollIntoView({behavior:'smooth',block:'start'});
+}
 show('B4');
 </script>
 

@@ -65,6 +65,11 @@
   .tip .tt:after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
        border:6px solid transparent;border-top-color:var(--dark);}
   .tip:hover .tt{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);}
+  .ptabbar{max-width:1250px;margin:14px auto -8px;padding:0 22px;display:flex;gap:6px;}
+  .ptab{cursor:pointer;border:none;background:#e4ecf5;border-radius:10px 10px 0 0;padding:9px 18px;font-size:15px;font-weight:700;color:var(--grey);}
+  .ptab.active{background:#fff;color:var(--blue);box-shadow:0 -3px 10px rgba(20,40,80,.06);}
+  #scnLog .scrow{padding:4px 6px;border-bottom:1px solid #eef2f7;line-height:1.45;font-size:12.5px;}
+  #scnLog .scrow .t{color:#94a3b8;} #scnLog .scrow .pr{color:var(--blue);font-weight:600;}
   footer{text-align:center;color:var(--grey);font-size:12px;padding:16px;}
 </style>
 </head>
@@ -74,7 +79,13 @@
   <p>Success-Ratio–driven, just like the real firmware: set the channel <b>SNR (dB)</b> and watch TLC keep the fastest rate that still delivers. Success Ratio comes from <b>measured EHT PER curves</b>, not a formula.</p>
 </header>
 
-<div class="wrap">
+<div class="ptabbar">
+  <button class="ptab active" data-tab="live" onclick="showTab('live')">🎛 Live decision</button>
+  <button class="ptab" data-tab="scenario" onclick="showTab('scenario')">📈 Simulation</button>
+  <button class="ptab" data-tab="doc" onclick="showTab('doc')">🏗 Architecture</button>
+</div>
+
+<div class="wrap" id="tab-live">
   <!-- Controls -->
   <div class="card">
     <h2>Your link conditions</h2>
@@ -96,9 +107,9 @@
     <select id="bw">
       <option value="20">20 MHz</option>
       <option value="40">40 MHz</option>
-      <option value="80" selected>80 MHz</option>
+      <option value="80">80 MHz</option>
       <option value="160">160 MHz</option>
-      <option value="320">320 MHz (EHT)</option>
+      <option value="320" selected>320 MHz (EHT)</option>
     </select>
 
     <label>Antennas
@@ -193,6 +204,52 @@
         further down the ladder, so data keeps flowing during a brief fade.</div>
     </div>
   </div>
+</div>
+
+<div class="wrap" id="tab-scenario" style="display:none;">
+  <div>
+    <div class="card">
+      <h2>Channel scenario</h2>
+      <div class="hint" style="margin-bottom:6px;">Each line: <code>ms, SNR[, SNR_end[, collision]]</code>. Set <b>SNR_end</b> for a linear ramp; collision is a 0–1 fraction. Uses the Live tab's Max BW / Antennas / PSD settings.</div>
+      <div class="scen" id="scnPresets"></div>
+      <textarea id="segs" spellcheck="false" style="width:100%;height:120px;margin-top:10px;font-family:Consolas,monospace;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;box-sizing:border-box;">3000, 40
+3000, 40, 6
+3000, 6, 40</textarea>
+      <button class="demoBtn" onclick="runScenario()">▶ Run scenario</button>
+      <div class="note" id="scnKpi" style="margin-top:14px;font-family:Consolas,monospace;white-space:pre;font-size:13px;color:#334155;"></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h2>Search cycle log — chosen PR</h2>
+      <div class="hint">Each SEARCH cycle (SC #, amber on the graphs) and the primary rate TLC settled on.</div>
+      <div id="scnLog" style="max-height:340px;overflow:auto;margin-top:8px;"></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>0 · Throughput over time — achieved vs best</h2>
+      <div class="hint">Green step = achieved (SR × rate) · purple = best possible · amber = SEARCH (numbered).</div>
+      <canvas id="scnTpt" width="900" height="175" style="width:100%;"></canvas>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h2>1 · TLC decision — MCS &amp; channel SNR</h2>
+      <div class="hint">Blue = MCS · dashed grey = SNR (right) · green STAY · amber SEARCH (numbered).</div>
+      <canvas id="scnMcs" width="900" height="175" style="width:100%;"></canvas>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h2>2 · TLC decision — bandwidth &amp; channel SNR</h2>
+      <div class="hint">Blue = chosen BW · dashed grey = SNR (right).</div>
+      <canvas id="scnBw" width="900" height="175" style="width:100%;"></canvas>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h2>3 · TLC decision — streams (SISO/MIMO) &amp; channel SNR</h2>
+      <div class="hint">Blue = chosen streams · dashed grey = SNR (right).</div>
+      <canvas id="scnNss" width="900" height="150" style="width:100%;"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="tab-doc" style="display:none;width:100%;padding:0;margin:0;">
+  <iframe id="docFrame" title="TLC Simulation — Interactive Architecture" style="width:100%;height:calc(100vh - 160px);border:0;display:block;"></iframe>
 </div>
 
 <footer>Success-Ratio–driven educational model. Success Ratio is derived from <b>measured HE/EHT PER-vs-SNR curves</b> (canonical AWGN, 0.8µs GI, MCS 0–13) — no sigmoid. TLC decides on measured Success Ratio, not SNR directly (RSSI is only a fallback). Not a bit-exact firmware simulation.</footer>
@@ -455,7 +512,204 @@ function toggleDemo(){
     snr_.value=v; upd();
   },130);
 }
+
+// ============ Scenario-over-time tab (closed-loop sim, ports tlcsim harness + ReferenceTLC) ============
+const BANDWIDTHS=[20,40,80,160,320];
+function sizeDocFrame(){
+  const f=document.getElementById('docFrame'); if(!f) return;
+  f.style.height=(window.innerHeight - f.getBoundingClientRect().top - 2)+'px';
+}
+function showTab(which){
+  document.getElementById('tab-live').style.display     = which==='live'    ?'':'none';
+  document.getElementById('tab-scenario').style.display = which==='scenario'?'':'none';
+  document.getElementById('tab-doc').style.display       = which==='doc'     ?'':'none';
+  document.querySelectorAll('.ptab').forEach(b=>b.classList.toggle('active', b.dataset.tab===which));
+  const ft=document.querySelector('footer'); if(ft) ft.style.display = which==='doc'?'none':'';
+  if(which==='scenario' && !window._scnRan){ window._scnRan=true; runScenario(); }
+  if(which==='doc'){ const f=document.getElementById('docFrame'); if(!f.src) f.src='tlc_sim_architecture_old.html'; window.scrollTo(0,0); requestAnimationFrame(sizeDocFrame); }
+}
+window.addEventListener('resize',()=>{ if(document.getElementById('tab-doc').style.display!=='none') sizeDocFrame(); });
+const SCN_PRESETS={
+  'steady':'9000, 32, -, 0.05',
+  'fade & recover':'3000, 40\n3000, 40, 6\n3000, 6, 40',
+  'sudden drop':'3000, 40\n3000, 8\n3000, 40',
+  'interference burst':'2000, 35, -, 0.02\n2000, 35, -, 0.40\n2000, 35, -, 0.02',
+  'long fade':'2000, 45\n5000, 45, 2\n2000, 2, 45',
+};
+(function(){ const box=document.getElementById('scnPresets'); if(box) for(const k in SCN_PRESETS){ const b=document.createElement('button'); b.textContent=k; b.onclick=()=>{ document.getElementById('segs').value=SCN_PRESETS[k]; runScenario(); }; box.appendChild(b); } })();
+
+function parseSegs(txt){ const segs=[];
+  for(const line of txt.trim().split('\n')){ const s=line.trim(); if(!s||s[0]==='#') continue;
+    const p=s.replace(/;/g,',').split(',').map(x=>x.trim());
+    if(p.length<2) throw new Error('need "ms, SNR": '+s);
+    const se=(p.length>2 && p[2]!=='' && p[2]!=='-')?+p[2]:null;
+    const col=(p.length>3 && p[3]!=='' && p[3]!=='-')?+p[3]:0;
+    segs.push({ms:+p[0],snr:+p[1],se,col}); }
+  return segs; }
+function chanAt(segs,t){ let acc=0;
+  for(const s of segs){ if(t<acc+s.ms){ const f=s.ms?(t-acc)/s.ms:0; return {snr:s.se==null?s.snr:s.snr+(s.se-s.snr)*f, col:s.col}; } acc+=s.ms; }
+  const s=segs[segs.length-1]; return {snr:s.se==null?s.snr:s.se, col:s.col}; }
+
+function makeTLC(maxBw,maxNss,MAXM){
+  const bws=BANDWIDTHS.filter(b=>b<=maxBw), nssOpts=maxNss>=2?[1,2]:[1];
+  const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300};
+  let col=[1,bws[0],true], mcs=0, sr={}, state='STAY', mode='search', succ=0, fail=0, lastEnd=-1e9, lastReason=null, pending=null, sq=[], best=null;
+  const key=(c,m)=>c[0]+','+c[1]+','+(c[2]?1:0)+','+m;
+  const avgtpt=(c,m,s)=>s*peakTpt(m,c[0],c[1],c[2]);
+  function neigh(){ const n=col[0],b=col[1],g=col[2],out=[]; for(const nn of nssOpts) if(nn!==n) out.push([nn,b,g]); const i=bws.indexOf(b); if(i+1<bws.length) out.push([n,bws[i+1],g]); if(i-1>=0) out.push([n,bws[i-1],g]); out.push([n,b,!g]); return out; }
+  function lq(){ return {primary:{mcs,nss:col[0],bw:col[1],gi08:col[2]}, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
+  function enter(s){ best=[col.slice(),mcs,avgtpt(col,mcs,s)]; sq=neigh(); succ=fail=0; state='SEARCH'; mode='search'; col=sq.shift(); mcs=Math.min(mcs,MAXM); }
+  return { lq, onStats(txed,acked,t){
+    const k=key(col,mcs), swin=acked/txed, s=C.EWMA*swin+(1-C.EWMA)*(sr[k]??swin); sr[k]=s;
+    succ+=acked; fail+=txed-acked;
+    if(state==='STAY'){
+      let held=false;
+      if(s<C.FORCE||(s<C.NODEC&&mcs>0)) mcs--;
+      else if(s>=C.PERF&&mcs<MAXM) mcs++;
+      else held=true;
+      mode=held?'dwell':'search';
+      let reason=null;
+      if(succ>C.SUCC){ if(lastReason==='FAIL') reason='SUCCESS'; else if(t-lastEnd>C.GUARD) reason='SUCCESS'; }
+      if(reason===null && fail>C.FAIL) reason='FAIL';
+      if(reason!==null){ pending=reason; enter(s); }
+    } else {
+      const cand=avgtpt(col,mcs,s); if(cand>best[2]) best=[col.slice(),mcs,cand];
+      if(sq.length){ col=sq.shift(); mcs=Math.min(mcs,MAXM); mode='search'; }
+      else { col=best[0]; mcs=best[1]; state='STAY'; succ=fail=0; lastReason=pending; lastEnd=t; mode='dwell'; }
+    }
+    return lq();
+  }};
+}
+
+function runScenario(){
+  const kpi=document.getElementById('scnKpi'); let segs;
+  try{ segs=parseSegs(document.getElementById('segs').value); }catch(e){ kpi.textContent='Error: '+e.message; return; }
+  const total=segs.reduce((a,s)=>a+s.ms,0); if(!total){ kpi.textContent='No segments.'; return; }
+  const maxBw=+bw_.value, maxNss=+ant_.value, frame=1500, MAXM=13;
+  const bws=BANDWIDTHS.filter(b=>b<=maxBw), cands=[];
+  for(const b of bws) for(let nn=maxNss;nn>=1;nn--) for(let m=0;m<=MAXM;m++) for(const g of [true,false]) cands.push([b,nn,m,g]);
+  const bc={}; const bestAt=(snr,cl)=>{ const r=Math.round(snr*2)/2; if(bc[r]===undefined){ let bt=0; for(const c of cands){ const e=peakTpt(c[2],c[1],c[0],c[3])*(1-perLookup(c[0],c[2],c[1],c[3],r)); if(e>bt)bt=e; } bc[r]=bt; } return bc[r]*(1-cl); };
+  const tlc=makeTLC(maxBw,maxNss,MAXM); let lq=tlc.lq(), t=0; const recs=[]; let g=0;
+  while(t<total && g++<60000){
+    const ch=chanAt(segs,t), N=lq.thold, p=lq.primary;
+    const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swin=(1-per)*(1-ch.col), acked=Math.round(N*swin);
+    const phy=peakTpt(p.mcs,p.nss,p.bw,p.gi08), dt=phy>0?N*frame*8/(phy*1e6)*1000:1;
+    recs.push({t,dt,mcs:p.mcs,nss:p.nss,bw:p.bw,gi:p.gi08,snr:ch.snr,col:ch.col,sr:swin,tpt:phy*swin,best:bestAt(ch.snr,ch.col),mode:lq.mode,state:lq.state});
+    lq=tlc.onStats(N,acked,t); t+=Math.max(dt,0.02);
+  }
+  drawScenario(recs,total);
+}
+
+function scnSpans(recs,val){ const out=[]; let st=null;
+  for(const r of recs){ if(r.state===val && st===null) st=r.t; else if(r.state!==val && st!==null){ out.push([st,r.t]); st=null; } }
+  if(st!==null) out.push([st, recs[recs.length-1].t+recs[recs.length-1].dt]); return out; }
+
+function drawScenario(recs,total){
+  const tot=recs.reduce((a,r)=>a+r.dt,0)||1;
+  const avgSR=recs.reduce((a,r)=>a+r.sr*r.dt,0)/tot, avgTpt=recs.reduce((a,r)=>a+r.tpt*r.dt,0)/tot;
+  const eff=recs.reduce((a,r)=>a+(r.best>0?r.tpt/r.best:0)*r.dt,0)/tot;
+  let sw=0; for(let i=1;i<recs.length;i++){ const a=recs[i],b=recs[i-1]; if(a.mcs!==b.mcs||a.bw!==b.bw||a.nss!==b.nss||a.gi!==b.gi) sw++; }
+  const scSpans=scnSpans(recs,'SEARCH'), searches=scSpans.length, dwell=recs.filter(r=>r.mode==='dwell').reduce((a,r)=>a+r.dt,0)/tot;
+  const scDur=searches?scSpans.reduce((a,[x,y])=>a+(y-x),0)/searches:0;   // avg SEARCH span length
+  let gapSum=0,gapN=0; for(let i=1;i<scSpans.length;i++){ gapSum+=scSpans[i][0]-scSpans[i-1][1]; gapN++; } // stable time between SCs
+  const scGap=gapN?gapSum/gapN:0;
+  document.getElementById('scnKpi').textContent =
+    'duration      : '+(total/1000).toFixed(1)+' s\n'+
+    'windows       : '+recs.length+'\n'+
+    'avg SR        : '+(avgSR*100).toFixed(0)+' %\n'+
+    'avg throughput: '+avgTpt.toFixed(0)+' Mbps\n'+
+    'efficiency    : '+(eff*100).toFixed(0)+' %\n'+
+    'rate switches : '+sw+'\n'+
+    'search cycles : '+searches+'\n'+
+    'time between SC: '+scGap.toFixed(1)+' ms\n'+
+    'SC duration   : '+scDur.toFixed(1)+' ms\n'+
+    'time in dwell : '+(dwell*100).toFixed(0)+' %';
+  drawScnTpt(recs,total); drawScnMcs(recs,total); drawScnBw(recs,total); drawScnNss(recs,total);
+  renderScLog(buildScList(recs));
+}
+function drawScnMcs(recs,total){
+  const c=document.getElementById('scnMcs'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
+  const padL=34,padR=48,padT=14,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
+  const xTo=t=>padL+t/total*plotW, yM=v=>padT+plotH-(v/13)*plotH;
+  let smin=Infinity,smax=-Infinity; for(const r of recs){ smin=Math.min(smin,r.snr); smax=Math.max(smax,r.snr); }
+  if(smax-smin<1){smin-=1;smax+=1;} const yS=v=>padT+plotH-((v-smin)/(smax-smin))*plotH;
+  scnBands(ctx,recs,xTo,padT,plotH);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(const v of [0,4,8,13]){ const y=yM(v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(v,padL-5,y+3); }
+  ctx.textAlign='left'; ctx.fillText(smax.toFixed(0),W-padR+5,yS(smax)+3); ctx.fillText(smin.toFixed(0),W-padR+5,yS(smin)+3);
+  ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1; ctx.setLineDash([4,3]); ctx.beginPath(); recs.forEach((r,i)=>{const x=xTo(r.t),y=yS(r.snr); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle='#0071C5'; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<recs.length;i++){ const r=recs[i],x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yM(r.mcs); if(i===0)ctx.moveTo(x0,y); else ctx.lineTo(x0,y); ctx.lineTo(x1,y); }
+  ctx.stroke();
+  ctx.fillStyle='#475569'; ctx.textAlign='center'; const secs=total/1000; for(let s=0;s<=secs+0.01;s+=Math.max(1,Math.round(secs/6))){ ctx.fillText(s,xTo(s*1000),H-12); }
+  ctx.save(); ctx.translate(11,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#0071C5'; ctx.fillText('MCS',0,0); ctx.restore();
+  ctx.save(); ctx.translate(W-9,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#94a3b8'; ctx.fillText('SNR (dB)',0,0); ctx.restore();
+}
+function drawScnTpt(recs,total){
+  const c=document.getElementById('scnTpt'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
+  const padL=48,padR=14,padT=16,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
+  const xTo=t=>padL+t/total*plotW;
+  let mx=0; for(const r of recs) mx=Math.max(mx,r.best,r.tpt);
+  const nice=v=>{ if(v<=0)return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); const f=v/p; return (f<=1?1:f<=2?2:f<=5?5:10)*p; };
+  const M=nice(mx), yT=v=>padT+plotH-(Math.min(v,M)/M)*plotH;
+  scnBands(ctx,recs,xTo,padT,plotH);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(let k=0;k<=4;k++){ const v=M*k/4,y=yT(v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(Math.round(v),padL-5,y+3); }
+  ctx.strokeStyle='#7C3AED'; ctx.lineWidth=1.5; ctx.beginPath(); recs.forEach((r,i)=>{const x=xTo(r.t),y=yT(r.best); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
+  ctx.strokeStyle='#2E8B57'; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<recs.length;i++){ const r=recs[i],x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yT(r.tpt); if(i===0)ctx.moveTo(x0,y); else ctx.lineTo(x0,y); ctx.lineTo(x1,y); }
+  ctx.stroke();
+  ctx.textAlign='left'; ctx.fillStyle='#2E8B57'; ctx.fillText('\u25a0 achieved',padL+4,padT-3); ctx.fillStyle='#7C3AED'; ctx.fillText('\u2014 best',padL+78,padT-3);
+  ctx.fillStyle='#475569'; ctx.textAlign='center'; const secs=total/1000; for(let s=0;s<=secs+0.01;s+=Math.max(1,Math.round(secs/6))){ ctx.fillText(s,xTo(s*1000),H-12); }
+  ctx.save(); ctx.translate(12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#475569'; ctx.fillText('Mbps',0,0); ctx.restore();
+}
+
+function scnBands(ctx,recs,xTo,padT,plotH){
+  for(const [a,b] of scnSpans(recs,'STAY')){ ctx.fillStyle='rgba(46,139,87,0.08)'; ctx.fillRect(xTo(a),padT,xTo(b)-xTo(a),plotH); }
+  scnSpans(recs,'SEARCH').forEach(([a,b],i)=>{ ctx.fillStyle='rgba(232,130,12,0.30)'; ctx.fillRect(xTo(a),padT,Math.max(1.5,xTo(b)-xTo(a)),plotH);
+    ctx.fillStyle='#a15c00'; ctx.font='bold 9px Segoe UI'; ctx.textAlign='center'; ctx.fillText(i+1,(xTo(a)+xTo(b))/2,padT+9); });
+}
+function scnSnrOverlay(ctx,recs,xTo,padL,padR,padT,plotH,W){
+  let smin=Infinity,smax=-Infinity; for(const r of recs){smin=Math.min(smin,r.snr);smax=Math.max(smax,r.snr);}
+  if(smax-smin<1){smin-=1;smax+=1;} const yS=v=>padT+plotH-((v-smin)/(smax-smin))*plotH;
+  ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1; ctx.setLineDash([4,3]); ctx.beginPath(); recs.forEach((r,i)=>{const x=xTo(r.t),y=yS(r.snr); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='left'; ctx.fillText(smax.toFixed(0),W-padR+5,yS(smax)+3); ctx.fillText(smin.toFixed(0),W-padR+5,yS(smin)+3);
+  ctx.save(); ctx.translate(W-9,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#94a3b8'; ctx.fillText('SNR (dB)',0,0); ctx.restore();
+}
+function drawScnBw(recs,total){
+  const c=document.getElementById('scnBw'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
+  const padL=40,padR=48,padT=14,padB=22,plotW=W-padL-padR,plotH=H-padT-padB, xTo=t=>padL+t/total*plotW;
+  const BW=[20,40,80,160,320], yB=v=>padT+plotH-(BW.indexOf(v)/(BW.length-1))*plotH;
+  scnBands(ctx,recs,xTo,padT,plotH);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(const v of BW){ const y=yB(v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(v,padL-5,y+3); }
+  scnSnrOverlay(ctx,recs,xTo,padL,padR,padT,plotH,W);
+  ctx.strokeStyle='#0071C5'; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<recs.length;i++){ const r=recs[i],x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yB(r.bw); if(i===0)ctx.moveTo(x0,y); else ctx.lineTo(x0,y); ctx.lineTo(x1,y); } ctx.stroke();
+  ctx.fillStyle='#475569'; ctx.textAlign='center'; const secs=total/1000; for(let s=0;s<=secs+0.01;s+=Math.max(1,Math.round(secs/6))){ ctx.fillText(s,xTo(s*1000),H-10); }
+  ctx.save(); ctx.translate(11,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#0071C5'; ctx.fillText('BW (MHz)',0,0); ctx.restore();
+}
+function drawScnNss(recs,total){
+  const c=document.getElementById('scnNss'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
+  const padL=48,padR=48,padT=14,padB=22,plotW=W-padL-padR,plotH=H-padT-padB, xTo=t=>padL+t/total*plotW, yN=v=>padT+plotH-((v-1)/1)*plotH;
+  scnBands(ctx,recs,xTo,padT,plotH);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(const v of [1,2]){ const y=yN(v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(v===2?'MIMO':'SISO',padL-5,y+3); }
+  scnSnrOverlay(ctx,recs,xTo,padL,padR,padT,plotH,W);
+  ctx.strokeStyle='#0071C5'; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<recs.length;i++){ const r=recs[i],x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yN(r.nss); if(i===0)ctx.moveTo(x0,y); else ctx.lineTo(x0,y); ctx.lineTo(x1,y); } ctx.stroke();
+  ctx.fillStyle='#475569'; ctx.textAlign='center'; const secs=total/1000; for(let s=0;s<=secs+0.01;s+=Math.max(1,Math.round(secs/6))){ ctx.fillText(s,xTo(s*1000),H-10); }
+}
+function buildScList(recs){
+  const spans=scnSpans(recs,'SEARCH'), list=[];
+  spans.forEach(([a,b],i)=>{ let r=null; for(const rec of recs){ if(rec.t>=b && rec.state==='STAY'){ r=rec; break; } } if(!r) r=recs[recs.length-1];
+    list.push({n:i+1,t:b,mcs:r.mcs,nss:r.nss,bw:r.bw,gi:r.gi}); });
+  return list;
+}
+function renderScLog(list){
+  const el=document.getElementById('scnLog'); if(!el) return;
+  if(!list.length){ el.innerHTML='<div style="color:#94a3b8;padding:4px;">No search cycles (the link stayed on one rate).</div>'; return; }
+  el.innerHTML=list.map(s=>'<div class="scrow"><b>SC '+s.n+'</b> <span class="t">@ '+(s.t/1000).toFixed(2)+' s</span> \u2192 <span class="pr">MCS'+s.mcs+' \u00b7 '+(s.nss==2?'MIMO':'SISO')+' \u00b7 '+s.bw+' MHz \u00b7 '+(s.gi?'0.8':'3.2')+'\u00b5s</span></div>').join('');
+}
+
 upd();
+{ const h=(location.hash||'').replace('#',''); if(['live','scenario','doc'].includes(h)) showTab(h); }
 </script>
 </body>
 </html>
