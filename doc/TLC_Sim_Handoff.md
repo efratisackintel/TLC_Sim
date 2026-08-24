@@ -2,7 +2,7 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-08-23.
+> Last updated: 2026-08-24.
 
 ---
 
@@ -171,7 +171,8 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 | File | What |
 |---|---|
 | `tlc_playground.html` | **Primary interactive artefact.** Three tabs (tab bar `.ptabbar` / `showTab()`, deep-linkable via `#live`/`#scenario`/`#doc`): **🎛 Live decision** (SNR slider → chosen MCS/streams/BW/GI, all-MCS PER-vs-SNR chart, PSD-penalty toggle, Mbps axis; **Max BW defaults to 320 MHz, Antennas to 2/MIMO**), **📈 Simulation** (closed-loop scenario over time: 4 charts — throughput, MCS+SNR, BW+SNR, streams+SNR — SEARCH bands numbered, search-cycle log with chosen PR, KPIs incl. **time between SC** and **SC duration**), **🏗 Architecture** (embeds the architecture doc via a right-sized full-width `<iframe>`; footer hidden on this tab). |
-| `tlc_sim_architecture_old.html` | The interactive architecture page (**renamed from `tlc_sim_architecture.html`**; now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). |
+| `tlc_sim_architecture_old.html` | The interactive architecture page (**renamed from `tlc_sim_architecture.html`**; now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6, 7 Decisions, 8 TLC flow, 9 TX power) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). **B3 now carries a "What counts in the Success Ratio" panel** (SR decomposition: channel PER vs collision, stacked-bar SVG + table). |
+| `tlc_sim_improvements.html` | **NEW (2026-08-24)** — the **💡 Improvements** tab (4th playground tab, `#improve`; loaded as an iframe like Architecture). Left `#poc`-style **Ideas** nav (`ideaGo()`). **Idea 1 — Handle collision**: problem (blended SR), proposed algorithm (split channel vs collision, don't down-scale for contention, protect with RTS/CTS), how-to-distinguish table, expected-impact table, and a **Test — collision scenario** section (setup preset, A/B pass-fail criteria, control checks, Python CI hook). |
 | `per_model_explorer.html` | Standalone PER explorer — every measured PER curve per permutation, log-axis toggle, SNR marker, CSV export. |
 | `TLC_Sim_Plan.md` | Implementation plan (recommends binding real C `rateScaleMng` via USFSTL for true fidelity; two time regimes; simulated clock; phases; KPIs). |
 | `TLC_Hierarchy.docx` | Word doc: TLC hierarchy, inputs/outputs, refresh rates, typical values, configs, TOC. |
@@ -219,10 +220,43 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - Annotate GUI decision plot with NSS/BW/GI (column) changes, not just MCS. *(Done in the browser Simulation tab — separate MCS / BW / streams charts; still open for the Tkinter GUI.)*
 - Add an explicit "no periodic timer — count-driven; 300 ms only rate-limits success searches" note on the HTML condition graphic.
 - Clean up the dead unused `B4FLOW` const still present in the HTML (harmless).
+- **Improvement Idea 1 — Handle collision** (documented in `tlc_sim_improvements.html`): split channel vs collision loss; don't down-scale for contention; protect with RTS. Prototype as an **opt-in "collision-aware TLC" toggle** in the Simulation tab (default OFF = FW-faithful) so the Improvements idea becomes a live A/B. Note: sim RTS is currently **cosmetic** (a flag) — to show Idea 1's benefit, RTS must actually lower the modeled collision rate.
+- **Improvement Idea 2 — GI / channel-profile awareness** (see 11.4): add channel-length/delay-spread (LOS/office/outdoor) via a GI-vs-τ ISI floor layered on the AWGN curves; makes GI selection meaningful.
+- **Fix the B3 doc caveat** (11.2): reword "real firmware separates the two…" → make clear FW counts collision/ACK losses together today; the distinguishing table is Idea 1 (proposed), not current behavior.
 
 ---
 
-## 11. Transcript pointer
+## 11. Session 2026-08-24 — key takeaways
+
+### 11.1 Success-Ratio semantics: what counts, and the collision blind spot
+- **SR blends two very different losses**: `SR = (1−PER)·(1−collision)`. Channel/PER loss is **rate-dependent** (lower MCS → (1−PER)↑); collision loss is **rate-INDEPENDENT** (same at every MCS).
+- **The collision blind spot** (why achieved TPT falls below `best` on a collision drop): during a contention burst SR sits at, e.g., 0.6 at *every* rate. Since 0.6 < `SR_NO_DEC` (90%), the TLC keeps down-scaling → collapses to **MCS 1** (≈147 Mbps) while `best` (optimal rate × (1−collision)) stays ≈ 2900 Mbps. Dropping MCS **cannot** recover a collision, so throughput tanks. Verified in the Simulation tab `interference burst` preset.
+- **The sim is FW-faithful here** — do NOT "fix" the sim to avoid the collapse: today's real RS_MNG behaves the same way (see 11.2). The collapse is the teaching point.
+
+### 11.2 How today's firmware counts losses (per-MPDU Block-ACK accounting)
+- RS_MNG accumulates `succ`/`att` (acked/txed) **per rate (column/MCS)** over its stat window (≈2000 MPDUs dwell / 20 probe).
+- With A-MPDU + Block-ACK, results are tallied **per MPDU** from the BA bitmap. If the **whole BA is lost** (BA timeout — collision *or* lost ACK on the return path), **all MPDUs of that aggregate count as failures**, even if the data was actually delivered.
+- **Worked example** (user's): 2 PPDUs × 100 MPDUs at the same rate — #1 loses its BA (100 counted failed), #2 has 50 CRC errors (50 failed). Combined: `att=200, succ=50` → **PER = 75%, SR = 25%**. The lost-BA aggregate may really have delivered all 100 → SR **over-penalizes** (true delivery could be 75%). RS_MNG can't tell; it just down-scales.
+- **Collision & ACK/BA losses ARE counted in the SR today** — there is **no split by cause**. The only current mitigation is **RTS/CTS** (preventive: fewer collisions), not corrective (it doesn't remove logged failures). Robustly separating the causes is exactly **Improvement Idea 1**.
+- **Doc caveat to fix later**: the B3 note still says "real firmware separates the two… collision-only losses don't force a down-scale" — that is **aspirational (Idea 1), not today's behavior**. Reword to make clear FW counts them together; the BA-bitmap/CCA/RSSI signals are what Idea 1 *would* exploit.
+
+### 11.3 Detection fingerprints (basis for Idea 1)
+| Signal | Collision / BA-loss | Bad rate / channel |
+|---|---|---|
+| Loss vs MCS | flat (rate-independent) | grows with MCS |
+| BA bitmap | whole A-MPDU lost (all-or-nothing) | partial / scattered |
+| CCA at TX | medium busy | medium clear |
+| RSSI trend | still strong | dropping |
+| Right response | RTS/CTS, **hold** rate | down-scale MCS/BW |
+
+### 11.4 PER model = **AWGN only** (channel-length / delay-spread finding)
+- Verified by scanning the full `.fig` source behind `PERModel/per_catalog.npz`: **78 figs, 25,536 curves, 100% `Channel = AWGN`, `PPM = 0`**. There are **no** channel-D / TGn / multipath curves.
+- Catalog key = `frameBW, channelBW, antenna, GI, MCS` — **no channel-type dimension**. GI (0.8/1.6/3.2) **is** a dimension, but under AWGN (zero delay spread) a longer GI only adds cyclic-prefix overhead with **no robustness benefit** → **GI 0.8 always wins today** (GI selection is effectively inert).
+- **Recommended approach to add channel length** (LOS ≈0.5µs→GI 0.8, office ≈1µs→GI 1.6, outdoor ≈3µs→GI 3.2): **layer a GI-vs-delay-spread penalty on the AWGN curves** (no new measured data needed). Add a **channel profile** (RMS delay spread τ) in B1; in B2, when **GI < τ** apply an ISI **error floor + SNR cap** (exponential PDP: leaked fraction ρ ≈ e^(−T_GI/τ) → SINR cap ≈ −10log₁₀ρ, `PER_eff = per_awgn(min(snr, SINR_max))` floored at ρ); when **GI ≥ τ**, no floor → AWGN as-is. This makes GI selection meaningful and emerges naturally from the existing search. Alternatives: (B) obtain real multipath curves + add `Channel` as a real dimension (gold standard, no data available); (C) static `(profile, GI)` offset table (simplest; good as the tunable knobs behind A). **Chosen direction: A with C's table as parameters** — becomes **Improvement Idea 2 — GI / channel-profile awareness**, opt-in so AWGN stays default.
+
+---
+
+## 12. Transcript pointer
 
 Full uncompacted conversation transcript (for exact snippets/code):
 ```

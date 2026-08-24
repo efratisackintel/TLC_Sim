@@ -77,6 +77,11 @@
   #poc a.active{background:var(--blue);color:#fff;border-color:transparent;}
   #poc a.active small{color:#dbeafe;}
   @media(max-width:1460px){#poc{display:none;}}
+  table.pentbl{border-collapse:collapse;font-size:11px;margin:7px 0 2px;}
+  table.pentbl th,table.pentbl td{border:1px solid #e2e8f0;padding:2px 8px;text-align:center;}
+  table.pentbl th:first-child,table.pentbl td:first-child{text-align:left;white-space:nowrap;}
+  table.pentbl th{background:#f1f5f9;color:var(--dark);}
+  table.pentbl td.z{color:#166534;font-weight:700;} table.pentbl td.n{color:#b91c1c;}
 </style>
 </head>
 <body>
@@ -94,6 +99,9 @@
   <a data-poc="B4" onclick="pocGo('B4')" title="TLC (Rate Scale Manager)">4 · B4<small>TLC</small></a>
   <a data-poc="B5" onclick="pocGo('B5')" title="Statistics Memory &amp; History">5 · B5<small>Stats Memory</small></a>
   <a data-poc="B6" onclick="pocGo('B6')" title="Harness / Scheduler">6 · B6<small>Harness</small></a>
+  <a data-poc="DEC" onclick="pocGo('DEC')" title="Architecture / modeling decisions">7 · Decisions<small>Design choices</small></a>
+  <a data-poc="FLOW" onclick="pocGo('FLOW')" title="Full TLC / RS_MNG flow, search cycle, timers, statistics">8 · TLC flow<small>Deep dive</small></a>
+  <a data-poc="TXP" onclick="pocGo('TXP')" title="TX power: regulatory EIRP / PSD limits per band">9 · TX power<small>Regulatory / PSD</small></a>
 </nav>
 
 <div class="wrap">
@@ -175,14 +183,310 @@
     <p class="hint">Tip: the green + purple arrows between B3 and B4 are the closed loop (rate table out → statistics/SR in).</p>
   </div>
 
-  <div class="card">
+  <div class="card" id="card_detail">
     <div id="detail"></div>
+  </div>
+
+  <!-- Architecture / modeling decisions (POC item 7) -->
+  <div class="card" id="card_decisions" style="display:none;">
+    <h2>Architecture decisions — what to be aware of</h2>
+    <p class="role">The modeling choices behind this simulator. They make it a faithful <b>teaching</b> model — <b>not</b> a bit-exact firmware port. Know these before drawing conclusions from a run.</p>
+    <table class="maps">
+      <tr><th style="width:250px;">Decision</th><th>Assumption / implication</th></tr>
+      <tr><td><b>Intel PER model = TLC PER model</b></td><td>Uses Intel's measured EHT PER‑vs‑SNR curves as the TLC's link model, <b>assuming the AP's PER behaviour is similar</b> (roughly symmetric link). A real peer/AP may have different curves.</td></tr>
+      <tr><td><b>SISO scored with the 1×2 PER model</b></td><td>Single‑stream (SISO) TX is evaluated with the <b>1×2</b> curve, <b>assuming the AP uses MRC receive combining with at least 2 antennas</b> (2‑antenna RX diversity). MIMO uses the <b>2×2</b> curve.</td></tr>
+      <tr><td><b>Canonical curve subset</b></td><td>Curves are the <b>full‑band (SU), PPM 0, RU‑index 1, AWGN, LDPC</b> operating point. Puncturing, other RUs, and non‑AWGN / real‑interference profiles are <b>not</b> modelled.</td></tr>
+      <tr><td><b>PER curves = 4000‑byte packets</b></td><td>The measured PER curves were captured at a <b>fixed 4000‑byte packet (PSDU)</b>. Real traffic uses varying sizes, so PER (and thus SR) must be <b>adapted to the actual packet length</b> — a shorter packet has lower PER at the same SNR, a longer one higher (PER scales roughly with bit count). <b>Not yet applied here.</b></td></tr>
+      <tr><td><b>Success‑Ratio driven, not SNR</b></td><td>The TLC decides on measured <b>Success Ratio</b> (like the firmware). SNR is used only to <b>synthesise</b> SR from the PER curve because there is no real radio; RSSI would be a fallback only.</td></tr>
+      <tr><td><b>PSD penalty is band-dependent</b></td><td>Selected by the <b>Band</b> control: <b>2.4 GHz</b> = total-power limited → full <b>−10·log₁₀(BW/20)</b> penalty; <b>5 GHz</b> = hybrid → penalty only above 80 MHz (<b>−10·log₁₀(BW/80)</b>); <b>6 GHz</b> = PSD-limited → <b>no penalty</b> (wider BW is free up to the total cap). See <b>§9 · TX power</b>. Still a proxy for the real SAR/TAS/PA/EIRP caps (table-driven, not a formula).
+        <table class="pentbl">
+          <tr><th>per-tone penalty (dB)</th><th>20</th><th>40</th><th>80</th><th>160</th><th>320</th></tr>
+          <tr><td><b>2.4 GHz</b> (total-power)</td><td class="z">0</td><td class="n">−3</td><td class="n">−6</td><td class="n">−9</td><td class="n">−12</td></tr>
+          <tr><td><b>5 GHz</b> (hybrid)</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="n">−3</td><td class="n">−6</td></tr>
+          <tr><td><b>6 GHz</b> (PSD-limited)</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+        </table></td></tr>
+      <tr><td><b>Deterministic (expected‑value)</b></td><td>Per window <code>acked = round(N × SR)</code> — <b>no Monte‑Carlo randomness</b> in the browser, so re‑runs are identical. (The Python harness has an optional seeded MC mode.)</td></tr>
+      <tr><td><b>Throughput model</b></td><td><code>peak = BASE_TPT(MCS) × BW‑factor × NSS × GI‑factor</code>. <b>Aggregation / AMSDU / airtime</b> are not modelled, whereas the real RS_MNG maximises airtime‑aggregated throughput.</td></tr>
+      <tr><td><b>Column climb via getBestRate</b></td><td>On a column/BW switch the search picks the lowest MCS whose throughput beats the stable column (mirrors firmware <code>_rsMngGetBestRate</code>). The full column graph / next‑columns table is simplified to ±1 BW · NSS · GI neighbours.</td></tr>
+      <tr><td><b>Rate grid &amp; scope</b></td><td>MCS <b>0–13</b>, GI <b>0.8 / 3.2 µs</b>, collision as an independent loss factor. TPC, DCM, ER, STBC and legacy‑column nuances are out of scope.</td></tr>
+      <tr><td><b>Not bit‑exact</b></td><td>A teaching / limit model of RS_MNG, not a line‑for‑line port of <code>rateScaleMng.c</code>.</td></tr>
+    </table>
+  </div>
+
+  <!-- TLC / RS_MNG full flow (POC item 8) -->
+  <div class="card" id="card_flow" style="display:none;">
+    <h2>How the TLC (RS_MNG) works — full flow</h2>
+    <p class="role">The real firmware rate controller is the <b>Rate-Scale Manager (RS_MNG / TLC)</b>, per-station in <b>UMAC</b>, and it is <b>Success-Ratio driven</b> (not SNR). Below: the whole closed loop, the search cycle, the timers, and the statistics — with what this simulator models vs. simplifies. <span class="file">fw/src/umac/main/dataPath/rateScaleMng/</span></p>
+
+    <div class="sub">1 · The closed loop — UMAC decides, LMAC executes</div>
+    <ul class="tree">
+      <li><b>UMAC · RS_MNG</b> chooses the rate and builds the <b>Link-Quality command</b> (<code>lqCmd-&gt;rate_scale_table</code>): primary rate + fallbacks.</li>
+      <li>↓ LQ_CMD pushed down to <b>LMAC / uCode</b></li>
+      <li><b>LMAC / HW</b> transmits, walks the <b>retry chain</b> per frame, counts <code>txed / acked</code> per rate.</li>
+      <li>↑ statistics returned to UMAC</li>
+      <li><b>RS_MNG</b> feeds the stats into the state machine → may rebuild the table (scale / search / column switch) → new LQ_CMD.</li>
+    </ul>
+    <svg viewBox="0 0 900 200" style="max-width:760px;margin:4px auto 2px;">
+      <defs>
+        <marker id="fbG" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2E8B57"/></marker>
+        <marker id="fbB" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0071C5"/></marker>
+      </defs>
+      <rect x="24" y="26" width="366" height="150" rx="12" fill="#E7F5EC" stroke="#2E8B57" stroke-width="2.2"/>
+      <text x="207" y="50" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2A44">LMAC / uCode / HW</text>
+      <text x="207" y="67" text-anchor="middle" font-size="10.5" fill="#2E8B57">per-frame execution</text>
+      <rect x="44" y="82" width="326" height="82" rx="8" fill="#fff" stroke="#cbd5e1"/>
+      <text x="207" y="103" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2A44">Transmit + walk retry chain</text>
+      <text x="207" y="122" text-anchor="middle" font-size="9.3" fill="#475569">PR → lower MCS → 20MHz → SISO → legacy</text>
+      <text x="207" y="140" text-anchor="middle" font-size="9.3" fill="#475569">count txed / acked per rate</text>
+      <text x="207" y="156" text-anchor="middle" font-size="9" fill="#94a3b8">reports statistics</text>
+      <rect x="510" y="26" width="366" height="150" rx="12" fill="#EAF3FB" stroke="#0071C5" stroke-width="2.2"/>
+      <text x="693" y="50" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2A44">UMAC · RS_MNG (TLC)</text>
+      <text x="693" y="67" text-anchor="middle" font-size="10.5" fill="#0071C5">Success-Ratio driven · per station · decides</text>
+      <rect x="530" y="82" width="164" height="82" rx="8" fill="#fff" stroke="#cbd5e1"/>
+      <text x="612" y="100" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2A44">State machine</text>
+      <text x="612" y="118" text-anchor="middle" font-size="8.8" fill="#0071C5" font-weight="700">in-column: up / down-scale MCS</text>
+      <text x="612" y="134" text-anchor="middle" font-size="8.5" fill="#94a3b8">— or —</text>
+      <text x="612" y="150" text-anchor="middle" font-size="8.8" fill="#E8820C" font-weight="700">new column: search cycle</text>
+      <rect x="702" y="82" width="158" height="82" rx="8" fill="#fff" stroke="#cbd5e1"/>
+      <text x="781" y="102" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2A44">Build LQ_CMD</text>
+      <text x="781" y="118" text-anchor="middle" font-size="9.5" fill="#475569">rate_scale_table</text>
+      <text x="781" y="132" text-anchor="middle" font-size="9.5" fill="#475569">PR + fallbacks</text>
+      <text x="781" y="150" text-anchor="middle" font-size="9" fill="#94a3b8">→ link-quality cmd</text>
+      <line x1="508" y1="72" x2="392" y2="72" stroke="#0071C5" stroke-width="2.6" marker-end="url(#fbB)"/>
+      <text x="450" y="64" text-anchor="middle" font-size="10.5" font-weight="700" fill="#0a4a7a">◀ LQ_CMD</text>
+      <line x1="392" y1="132" x2="508" y2="132" stroke="#2E8B57" stroke-width="2.6" marker-end="url(#fbG)"/>
+      <text x="450" y="148" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1e6b43">TX stats → SR ▶</text>
+    </svg>
+
+    <div class="sub">2 · Three independent mechanisms (don't confuse them)</div>
+    <table class="maps">
+      <tr><th>Mechanism</th><th>Changes</th><th>Driven by</th><th>Cadence / limit</th></tr>
+      <tr><td><b>In-column rate scaling</b></td><td><b>MCS</b> inside the current column</td><td>measured SR &amp; throughput vs thresholds</td><td>every stat window; <b>upscale</b> probes ≤ once / ~100–200 ms</td></tr>
+      <tr><td><b>Search cycle (SC)</b></td><td>the <b>column</b> = NSS · BW · GI · antenna</td><td>frame counters (success / fail)</td><td>success searches ≥ 300 ms apart; fail = immediate</td></tr>
+      <tr><td><b>Retry table</b></td><td>per-frame <b>fallback ladder</b> (MCS↓, BW↓, SISO, legacy)</td><td>frame failure (hardware)</td><td>within one transmission</td></tr>
+    </table>
+
+    <div class="sub">3 · Search cycle — step by step</div>
+    <ul class="tree">
+      <li class="dn"><b>Trigger</b> — one of four start reasons (table 4).</li>
+      <li>Pick candidate <b>columns</b> from the column graph (up to <code>MAX_COLUMN_CHECKS = 4</code> of <code>MAX_NEXT_COLUMNS = 8</code>).</li>
+      <li>For each candidate, <code>_rsMngGetBestRate()</code> picks the <b>lowest MCS whose expected tpt beats the current column</b> — not the incumbent's MCS.</li>
+      <li>Run a short <b>test window</b> (<code>UPSCALE_AGG_FRAME_COUNT = 20</code> frames) at the candidate; measure SR × tpt.</li>
+      <li class="up"><b>SWITCH_TO_TEST_COL</b> if it wins, else <b>REVERT_TO_STABLE_COL</b>.</li>
+      <li>Telemetry: <code>SEARCH_CYCLE_START/END</code>, <code>TRY_COLUMN_SWITCH</code>, <code>SCALE_ACTION</code>.</li>
+    </ul>
+    <svg viewBox="0 -58 900 585" style="max-width:720px;margin:6px auto 2px;">
+      <defs>
+        <marker id="fp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#475569"/></marker>
+        <marker id="fpg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/></marker>
+      </defs>
+      <rect x="58" y="-52" width="394" height="38" rx="9" fill="#EDE9FE" stroke="#7C3AED" stroke-width="1.8"/>
+      <text x="255" y="-37" text-anchor="middle" font-size="10.5" font-weight="800" fill="#5b21b6">① INIT (association) — RSSI/SNR-seeded start rate</text>
+      <text x="255" y="-24" text-anchor="middle" font-size="8.5" fill="#475569">good signal → max BW + MIMO, ~MCS 3   ·   else 20 MHz SISO</text>
+      <line x1="255" y1="-14" x2="255" y2="8" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <rect x="150" y="10" width="210" height="34" rx="16" fill="#E6F4F5" stroke="#0E7C86" stroke-width="2"/>
+      <text x="255" y="32" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0E7C86">Stats window → SR, throughput</text>
+      <line x1="255" y1="44" x2="255" y2="62" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <polygon points="160,94 255,62 350,94 255,126" fill="#FBEFE0" stroke="#E8820C" stroke-width="1.8"/>
+      <text x="255" y="98" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2A44">SR &lt; 90% ?</text>
+      <line x1="350" y1="94" x2="474" y2="94" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="408" y="86" text-anchor="middle" font-size="9.5" fill="#b91c1c" font-weight="700">yes</text>
+      <rect x="476" y="78" width="212" height="32" rx="6" fill="#DCEDFB" stroke="#0071C5"/>
+      <text x="582" y="98" text-anchor="middle" font-size="10.5" fill="#1F2A44">MCS ↓  (uses fallback stats)</text>
+      <line x1="255" y1="126" x2="255" y2="146" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="268" y="141" font-size="9.5" fill="#166534" font-weight="700">no</text>
+      <polygon points="160,178 255,146 350,178 255,210" fill="#FBEFE0" stroke="#E8820C" stroke-width="1.8"/>
+      <text x="255" y="182" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2A44">SR ≥ 95% ?</text>
+      <line x1="350" y1="178" x2="474" y2="178" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="408" y="170" text-anchor="middle" font-size="9.5" fill="#166534" font-weight="700">yes</text>
+      <rect x="476" y="156" width="242" height="46" rx="6" fill="#E7F5EC" stroke="#2E8B57"/>
+      <text x="597" y="175" text-anchor="middle" font-size="10" font-weight="700" fill="#1F2A44">UPSCALE PROBE</text>
+      <text x="597" y="190" text-anchor="middle" font-size="8.6" fill="#475569">higher rate = test (20f), gated ~100–200 ms</text>
+      <line x1="597" y1="202" x2="597" y2="220" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <polygon points="537,250 597,222 657,250 597,278" fill="#FBEFE0" stroke="#E8820C" stroke-width="1.6"/>
+      <text x="597" y="254" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">good?</text>
+      <line x1="657" y1="250" x2="705" y2="250" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="682" y="243" text-anchor="middle" font-size="8.5" fill="#166534" font-weight="700">yes</text>
+      <rect x="707" y="234" width="150" height="32" rx="6" fill="#eafaf0" stroke="#2E8B57"/>
+      <text x="782" y="254" text-anchor="middle" font-size="9.5" fill="#166534" font-weight="700">commit → new PR</text>
+      <line x1="597" y1="278" x2="597" y2="298" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="608" y="293" font-size="8.5" fill="#b91c1c" font-weight="700">no</text>
+      <rect x="511" y="300" width="172" height="28" rx="6" fill="#fdecec" stroke="#b91c1c"/>
+      <text x="597" y="319" text-anchor="middle" font-size="9.5" fill="#b91c1c">downscale back</text>
+      <line x1="255" y1="210" x2="255" y2="230" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="268" y="224" font-size="9.5" fill="#94a3b8" font-weight="700">no</text>
+      <rect x="190" y="230" width="130" height="30" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="255" y="249" text-anchor="middle" font-size="10.5" fill="#475569">hold MCS</text>
+      <line x1="255" y1="260" x2="255" y2="282" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <polygon points="135,326 255,284 375,326 255,368" fill="#FBEFE0" stroke="#E8820C" stroke-width="1.8"/>
+      <text x="255" y="322" text-anchor="middle" font-size="9.6" font-weight="700" fill="#1F2A44">succ &gt; 4500 (≥300ms)</text>
+      <text x="255" y="336" text-anchor="middle" font-size="9.6" font-weight="700" fill="#1F2A44">or fail &gt; 400 ?</text>
+      <line x1="255" y1="368" x2="255" y2="390" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
+      <text x="268" y="384" font-size="9.5" fill="#E8820C" font-weight="700">yes</text>
+      <polyline points="135,326 60,326 60,27 148,27" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#fpg)"/>
+      <text x="66" y="200" font-size="9" fill="#94a3b8" font-weight="700" transform="rotate(-90 66,200)">no · wait next window</text>
+      <rect x="70" y="390" width="590" height="120" rx="12" fill="#FBEFE0" stroke="#E8820C" stroke-width="2.4"/>
+      <text x="365" y="410" text-anchor="middle" font-size="12" font-weight="800" fill="#7a4a00">SEARCH CYCLE — change the column</text>
+      <rect x="86" y="424" width="128" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
+      <text x="150" y="454" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">1 · save</text>
+      <text x="150" y="468" text-anchor="middle" font-size="9.3" fill="#475569">stable column</text>
+      <rect x="228" y="424" width="128" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
+      <text x="292" y="450" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">2 · pick neighbour</text>
+      <text x="292" y="464" text-anchor="middle" font-size="8.6" fill="#475569">getBestRate MCS</text>
+      <text x="292" y="478" text-anchor="middle" font-size="8.6" fill="#475569">(±BW · NSS · GI)</text>
+      <rect x="370" y="424" width="128" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
+      <text x="434" y="452" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">3 · test window</text>
+      <text x="434" y="466" text-anchor="middle" font-size="8.6" fill="#475569">20 frames → SR×tpt</text>
+      <rect x="512" y="424" width="132" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
+      <text x="578" y="450" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">4 · beats stable?</text>
+      <text x="578" y="466" text-anchor="middle" font-size="8.8" fill="#166534" font-weight="700">SWITCH</text>
+      <text x="578" y="479" text-anchor="middle" font-size="8.8" fill="#b91c1c" font-weight="700">or REVERT</text>
+      <line x1="214" y1="459" x2="226" y2="459" stroke="#475569" stroke-width="1.4" marker-end="url(#fp)"/>
+      <line x1="356" y1="459" x2="368" y2="459" stroke="#475569" stroke-width="1.4" marker-end="url(#fp)"/>
+      <line x1="498" y1="459" x2="510" y2="459" stroke="#475569" stroke-width="1.4" marker-end="url(#fp)"/>
+      <polyline points="660,450 878,450 878,27 362,27" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#fpg)"/>
+      <text x="884" y="250" font-size="9" fill="#94a3b8" font-weight="700" transform="rotate(-90 884,250)">→ resume STAY at winning column</text>
+    </svg>
+    <p class="hint" style="margin-top:2px;"><b>What does "SR &lt; 90%" measure over?</b> The success ratio is computed per <b>statistics window counted in frames</b> — <b>2000</b> in the stable state, <b>20</b> in a probe/test — <i>not</i> over a fixed time. A window closes when its frame counter fills, so its wall-clock length depends on the traffic rate (~10–20 ms on a saturated link, hundreds of ms at realistic offered load). The 90% / 95% thresholds act on an <b>IIR-filtered</b> (EWMA) SR across those windows, not a single one.</p>
+    <p class="hint" style="margin-top:-4px;"><b>It's a first-order IIR low-pass filter</b> (Infinite Impulse Response) — the same thing statistics calls an <b>EWMA</b> (exponentially-weighted moving average). One recursion: <code>s = α·new + (1−α)·s_prev</code> (here <code>α ≈ 0.4</code>: ~40% newest window, 60% history; a single pole at <code>1−α = 0.6</code>). It reacts quickly to a real change yet smooths single-window noise, so one unlucky window can't flip the decision — it "remembers" the last ~2 windows with exponentially fading weight, using just one multiply-add and one state variable.</p>
+
+    <div class="sub">4 · Search-cycle start reasons (<code>_rsMngShouldStartSearchCycle</code>)</div>
+    <table class="maps">
+      <tr><th>Reason</th><th>Condition</th><th>Guard</th></tr>
+      <tr><td>succeeded_frames</td><td><code>totalFramesSuccess &gt; 4500</code> &amp; previous cycle was a FAIL</td><td>none — re-probe up fast</td></tr>
+      <tr><td>succeeded_frames_time</td><td><code>totalFramesSuccess &gt; 4500</code></td><td><code>timeSinceLastSearch &gt; 300 ms</code></td></tr>
+      <tr><td>failed_frames</td><td><code>totalFramesFailed &gt; 400</code></td><td>none — recover immediately</td></tr>
+      <tr><td>flush_time</td><td>periodic statistics flush</td><td>—</td></tr>
+    </table>
+
+    <div class="sub">5 · Rate scaling &amp; the upscale probe</div>
+    <ul class="tree">
+      <li class="dn"><b>Downscale</b> — free &amp; immediate: the lower fallback rates already have stats from retries, so it drops when SR is insufficient or a lower rate has higher tpt.</li>
+      <li class="up"><b>Upscale</b> — needs a <b>probe</b>: the higher rate isn't in the table, so RS_MNG makes it the <b>test rate</b> (top of the table, 20-frame window) and sets <code>tryingRateUpscale</code>.</li>
+      <li>Good probe → next action is STAY → the higher rate <b>becomes the PR</b> (table rebuilt around it). Bad probe → downscale back.</li>
+      <li>Throttled by <code>UPSCALE_MAX_FREQUENCY</code>; a higher MCS that just failed is ignored for <code>UPSCALE_IGNORE_HIGHER_MCS = 1000 ms</code>. No throttle <i>inside</i> a search cycle.</li>
+      <li class="up"><b>Recovery / stale stats:</b> stats older than <code>RS_MNG_TIME_STAT_RESET_THRESHOLD</code> are <b>reset</b> (not blended with the old ~0 SR), and a power/RSSI change kicks a fresh search — so when a fade lifts, the TLC re-probes with a clean slate instead of crawling up through stale success ratios.</li>
+    </ul>
+
+    <div class="sub">6 · Retry table — the fallback ladder (built by UMAC, run by LMAC)</div>
+    <ul class="tree">
+      <li>Primary rate ×N (initial entries)</li>
+      <li>↓ lower <b>MCS</b> in the same column</li>
+      <li>↓ <b>bandwidth</b> reduced to 20 MHz</li>
+      <li>↓ <b>MIMO → SISO</b>, single antenna (+ antenna toggle)</li>
+      <li>↓ <b>legacy / non-HT</b> rates, down to the lowest</li>
+    </ul>
+
+    <div class="sub">7 · Time limits &amp; thresholds (<span class="file">_rateScaleMng.h</span>)</div>
+    <table class="maps">
+      <tr><th>Constant</th><th>Value</th><th>Meaning</th></tr>
+      <tr><td>NON_LEGACY_SUCCESS_LIMIT</td><td>4500</td><td>success frames → consider an upscale search</td></tr>
+      <tr><td>NON_LEGACY_FAILURE_LIMIT</td><td>400</td><td>failed frames → immediate search</td></tr>
+      <tr><td>UPSCALE_SEARCH_CYCLE_MAX_FREQ</td><td>300 ms</td><td>min spacing between success-triggered searches</td></tr>
+      <tr><td>UPSCALE_MAX_FREQUENCY</td><td>~100–200 ms</td><td>min spacing between in-column upscale attempts</td></tr>
+      <tr><td>UPSCALE_IGNORE_HIGHER_MCS</td><td>1000 ms</td><td>avoid a higher MCS that just failed</td></tr>
+      <tr><td>OPTIMAL_RATE_FRAME_COUNT</td><td>2000</td><td>stable / “optimal” stat window size</td></tr>
+      <tr><td>TIME_STAT_RESET_THRESHOLD</td><td>~260 frames</td><td>invalidate stale throughput stats → clean re-probe on recovery</td></tr>
+      <tr><td>UPSCALE_AGG_FRAME_COUNT</td><td>20</td><td>short test-window size (search / upscale)</td></tr>
+      <tr><td>PERFECT_SR / SR_NO_DECREASE / SR_FORCE_DECREASE</td><td>95% / 90% / 15%</td><td>climb / hold / force-down thresholds</td></tr>
+    </table>
+
+    <div class="sub">8 · Statistics collected (per station, per rate)</div>
+    <table class="maps">
+      <tr><th>Field</th><th>Use</th></tr>
+      <tr><td>txed / acked (primary &amp; all rates)</td><td>success ratio per rate</td></tr>
+      <tr><td>currentSR (IIR / EWMA)</td><td>the SR the state machine acts on</td></tr>
+      <tr><td>averageTpt</td><td>expected-tpt × SR — the maximisation target</td></tr>
+      <tr><td>ba_txed / ba_acked, aggFactor</td><td>aggregation efficiency</td></tr>
+      <tr><td>trafficLoad</td><td>offered load — how fast the frame counters fill</td></tr>
+    </table>
+
+    <div class="sub">9 · What this simulator models vs simplifies</div>
+    <ul class="tree">
+      <li class="ok"><b>Models:</b> SR-driven decisions, RSSI/SNR warm start, expected-tpt column climb (<code>getBestRate</code>), <b>gated upscale + ignore-failed-MCS cooldown + stale-stat reset</b>, search triggers (success count/time, fail), STAY vs SEARCH, PER from measured curves.</li>
+      <li class="dn"><b>Simplifies:</b> upscale is a gated step, not a real 20-frame test window; no offered-load clock (saturated link → compressed SC timing); retry table not executed (primary-rate SR only); no aggregation / AMSDU / TPC; column set = ±1 BW · NSS · GI, not the full 22-column graph.</li>
+    </ul>
+  </div>
+
+  <!-- TX power / regulatory PSD (POC item 9) -->
+  <div class="card" id="card_txpower" style="display:none;">
+    <h2>TX power — regulatory limits &amp; the PSD penalty</h2>
+    <p class="role"><b>IEEE 802.11 doesn't set power limits</b> — it defines the spectral mask, <b>EVM</b> (which forces per-MCS backoff: 4096-QAM / MCS13 needs several dB less power than MCS7), and TPC. The real limits are <b>regulatory</b>, and come as two caps: a <b>total EIRP</b> cap (dBm) and a <b>spectral-density (PSD)</b> cap (dBm/MHz). The device transmits at <code>EIRP = min(total_EIRP_cap, PSD_limit + 10·log₁₀(BW_MHz))</code> — so whether a wider channel costs per-tone SNR is <b>band-dependent</b>.</p>
+
+    <div class="sub">Per-tone power vs bandwidth — by band</div>
+    <svg viewBox="0 0 900 300" style="max-width:740px;margin:4px auto 2px;">
+      <line x1="60" y1="20" x2="720" y2="20" stroke="#eef2f7"/>
+      <line x1="60" y1="71" x2="720" y2="71" stroke="#eef2f7"/>
+      <line x1="60" y1="123" x2="720" y2="123" stroke="#eef2f7"/>
+      <line x1="60" y1="174" x2="720" y2="174" stroke="#eef2f7"/>
+      <line x1="60" y1="226" x2="720" y2="226" stroke="#eef2f7"/>
+      <text x="54" y="24" text-anchor="end" font-size="10" fill="#94a3b8">0</text>
+      <text x="54" y="75" text-anchor="end" font-size="10" fill="#94a3b8">-3</text>
+      <text x="54" y="127" text-anchor="end" font-size="10" fill="#94a3b8">-6</text>
+      <text x="54" y="178" text-anchor="end" font-size="10" fill="#94a3b8">-9</text>
+      <text x="54" y="230" text-anchor="end" font-size="10" fill="#94a3b8">-12</text>
+      <line x1="60" y1="16" x2="60" y2="262" stroke="#cbd5e1"/>
+      <line x1="60" y1="262" x2="720" y2="262" stroke="#cbd5e1"/>
+      <text x="60" y="278" text-anchor="middle" font-size="10" fill="#475569">20</text>
+      <text x="225" y="278" text-anchor="middle" font-size="10" fill="#475569">40</text>
+      <text x="390" y="278" text-anchor="middle" font-size="10" fill="#475569">80</text>
+      <text x="555" y="278" text-anchor="middle" font-size="10" fill="#475569">160</text>
+      <text x="720" y="278" text-anchor="middle" font-size="10" fill="#475569">320</text>
+      <polyline points="60,20 225,71 390,123 555,174 720,226" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="5,3"/>
+      <polyline points="60,20 225,71" fill="none" stroke="#b91c1c" stroke-width="2.6"/>
+      <polyline points="60,20 225,20 390,37 555,71" fill="none" stroke="#0071C5" stroke-width="2.6"/>
+      <polyline points="60,20 225,20 390,20 555,20 720,20" fill="none" stroke="#2E8B57" stroke-width="2.8"/>
+      <g stroke="#2E8B57" stroke-width="1.7"><path d="M56,16 L64,24 M56,24 L64,16"/><path d="M221,16 L229,24 M221,24 L229,16"/><path d="M386,16 L394,24 M386,24 L394,16"/><path d="M551,16 L559,24 M551,24 L559,16"/><path d="M716,16 L724,24 M716,24 L724,16"/></g>
+      <g stroke="#0071C5" stroke-width="1.7"><path d="M386,33 L394,41 M386,41 L394,33"/><path d="M551,67 L559,75 M551,75 L559,67"/></g>
+      <g stroke="#b91c1c" stroke-width="1.7"><path d="M221,67 L229,75 M221,75 L229,67"/></g>
+      <line x1="702" y1="20" x2="702" y2="226" stroke="#7C3AED" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="696" y="123" text-anchor="middle" font-size="9" fill="#7C3AED" font-weight="700" transform="rotate(-90 696,123)">−12 dB (sim penalty)</text>
+      <text x="726" y="23" font-size="10.5" font-weight="700" fill="#166534">6 GHz (20–320) · PSD</text>
+      <text x="563" y="66" font-size="10" font-weight="700" fill="#0a4a7a">5 GHz (≤160)</text>
+      <text x="232" y="87" font-size="10" font-weight="700" fill="#b91c1c">2.4 GHz (20/40)</text>
+      <text x="726" y="229" font-size="9.5" font-weight="700" fill="#64748b">fixed total power (sim)</text>
+      <text x="390" y="296" text-anchor="middle" font-size="10.5" font-weight="700" fill="#475569">channel bandwidth (MHz)</text>
+      <text x="18" y="140" text-anchor="middle" font-size="10.5" font-weight="700" fill="#475569" transform="rotate(-90 18,140)">per-tone power (dB, rel. 20 MHz)</text>
+    </svg>
+    <p class="hint"><b>Flat green = no PSD penalty</b> (6 GHz, wider BW is free per tone). <b>Grey dashed = fixed-total-power</b> reference (−3 dB per BW doubling) — what the sim's PSD penalty assumes; the purple gap at 320 MHz is the −12 dB it applies. <b>2.4 GHz</b> (only 20/40) tracks the fixed-power slope; <b>5 GHz</b> (only up to 160) stays flat until its EIRP cap binds. × marks the valid channel widths.</p>
+
+    <div class="sub">Band behaviour</div>
+    <table class="maps">
+      <tr><th>Band</th><th>Governing limit</th><th>Wider BW (20 → 320)</th></tr>
+      <tr><td><b>2.4 GHz</b></td><td>mostly <b>total-EIRP</b> limited (+ a PSD cap); only 20/40 MHz</td><td>total power fixed → <b>per-tone SNR drops</b> (≈ the penalty)</td></tr>
+      <tr><td><b>5 GHz</b></td><td><b>both</b> PSD &amp; total-EIRP caps, per sub-band; max <b>160 MHz</b></td><td>per-tone flat until the EIRP cap binds, then drops</td></tr>
+      <tr><td><b>6 GHz</b> (6E/7)</td><td><b>PSD-based</b> power classes; enables <b>320 MHz</b></td><td><b>per-tone ~constant</b> — wider BW is allowed proportionally more power up to the total cap → <b>~no penalty</b></td></tr>
+    </table>
+
+    <div class="sub">6 GHz power classes (PSD-defined)</div>
+    <ul class="tree">
+      <li><b>LPI</b> (Low-Power Indoor): PSD ≈ <b>5 dBm/MHz</b>, total cap <b>30 dBm</b> → 20 MHz = 18 dBm … 320 MHz = 30 dBm (cap). Per-tone constant across the whole range.</li>
+      <li><b>VLP</b> (Very-Low-Power): low PSD / ~14 dBm total, no AFC.</li>
+      <li><b>Standard Power</b>: with <b>AFC</b>, higher PSD (~23 dBm/MHz).</li>
+    </ul>
+
+    <div class="sub">What the firmware actually applies</div>
+    <ul class="tree">
+      <li><b>PPMCS calibration tables</b> — per-MCS · per-BW · per-chain power, incl. the <b>EVM / linearity backoff</b> (high QAM ⇒ less power).</li>
+      <li><b>PSD limits</b> — first-class: <code>phyEngineSetAuxPsdPowerLimit()</code>, host <code>DynamicPsdLimit</code>, regulatory source arbiter (dBm/MHz, per domain / band).</li>
+      <li><b>SAR</b> (<code>g_sarDb</code>) and <b>TAS</b> (time-averaged SAR) caps · <b>TLC backoff</b> (<code>tlcBackoff</code> → <code>_swTxpPowerLimitCalc</code>).</li>
+      <li>Applied ≈ <code>min(PPMCS, regulatory·PSD, SAR, TAS) − backoff</code> — <b>table + regulation driven, not a formula</b>.</li>
+    </ul>
+
+    <div class="sub">Effect on this simulator</div>
+    <ul class="tree">
+      <li class="ok">The PSD penalty is realistic in the <b>total-power / SAR-capped</b> regime (2.4 GHz, or any band once it hits the total cap).</li>
+      <li class="dn">It is <b>too pessimistic for PSD-limited 6 GHz</b> (LPI/SP below the cap), where wider BW is ~free per tone — which is why it's a <b>toggle</b>.</li>
+    </ul>
   </div>
 
   <!-- B2-specific: PER Model explorer (shown only when B2 selected) -->
   <div class="card" id="perExplorer">
     <h2>B2 · PER Model — explore the measured curves</h2>
-    <p class="role">The exact PER-vs-SNR data B2 uses, for any permutation: <b>frame BW · channel BW · antenna · guard interval</b>. Click the tabs. (Full catalog: <span class="file">PERModel/PER_Model_AllPermutations.xlsx</span>.)</p>
+    <p class="role">The exact PER-vs-SNR data B2 uses, for any permutation: <b>frame BW · channel BW · antenna · guard interval</b>. Click the tabs.</p>
+    <p class="role" style="margin-top:-6px;"><b>Download source workbooks:</b>
+      <a href="../PERModel/RSSI_to_MCS_and_TpT_Mapping.xlsx" download style="color:var(--blue);font-weight:600;">RSSI → MCS &amp; Throughput mapping (.xlsx)</a> &nbsp;·&nbsp;
+      <a href="../PERModel/PER_Model_AllPermutations.xlsx" download style="color:var(--blue);font-weight:600;">PER Model — all permutations (.xlsx)</a></p>
     <div class="extabrow"><span class="exlbl">Frame BW</span><div class="extabs" id="ex_fbwTabs"></div></div>
     <div class="extabrow"><span class="exlbl">Channel BW</span><div class="extabs" id="ex_chbwTabs"></div></div>
     <div class="extabrow"><span class="exlbl">Antenna</span><div class="extabs" id="ex_antTabs"></div></div>
@@ -373,7 +677,7 @@ const B4FLOW = `<div class="flowbox"><svg viewBox="0 0 470 500">
   <text x="235" y="30" text-anchor="middle" font-size="12" font-weight="700" fill="#1F2A44">New statistics → Success Ratio</text>
   <line x1="235" y1="42" x2="235" y2="56" stroke="#64748b" stroke-width="1.6" marker-end="url(#fb)"/>
   <rect x="120" y="56" width="230" height="34" rx="8" fill="#f8fafc" stroke="#0071C5" stroke-width="1.6"/>
-  <text x="235" y="77" text-anchor="middle" font-size="11.5" fill="#1F2A44">Update smoothed SR (EWMA)</text>
+  <text x="235" y="77" text-anchor="middle" font-size="11.5" fill="#1F2A44">Update smoothed SR (IIR)</text>
   <line x1="235" y1="90" x2="235" y2="108" stroke="#64748b" stroke-width="1.6" marker-end="url(#fb)"/>
 
   <!-- D1 -->
@@ -434,7 +738,7 @@ const FLOW = {
              {t:'dec',txt:'Monte-Carlo?\nyes: draw N coins · no: N×(1−PER)'},
              {t:'out',txt:'WindowStats(txed, acked) → SR'}], COLOR.B3),
   B4: vflow([{t:'start',txt:'New statistics → Success Ratio'},
-             {t:'proc',txt:'Update EWMA SR\n(per column & MCS)'},
+             {t:'proc',txt:'Update SR (IIR / EWMA)\n(per column & MCS)'},
              {t:'proc',txt:'STAY: scale MCS in column\n↑ SR≥95% · ↓ SR<90% · else hold'},
              {t:'dec',txt:'start a search cycle?\nfail>400: now · succ>4500: if >300ms'},
              {t:'proc',txt:'SEARCH: try neighbour columns\n(SISO/MIMO · ±BW · GI)'},
@@ -565,12 +869,54 @@ const DATA = {
  B3:{role:"LMAC + PHY surrogate. Applies the rate table over a window of frames against the PER model and aggregates txed/acked → Success Ratio. This block closes the loop.",
      io:io(["rate_table (from B4)","ChannelState (from B1)","window_frames"],"B3<br>Emulator",["WindowStats { txed, acked, sr }"],COLOR.B3),
      funcs:funcs([["simulate_window(table, ch, N)","transmit N frames at primary; count acks"]]),
-     tree:`<div class="sub">notes</div><ul class="tree"><li>reports the <b>primary</b> rate's Success Ratio</li><li>coarse mean, or Monte-Carlo draws</li><li class="up">Phase 2: full retry-chain + A-MPDU</li></ul>`},
+     tree:`<div class="sub">notes</div><ul class="tree"><li>reports the <b>primary</b> rate's Success Ratio</li><li>coarse mean, or Monte-Carlo draws</li><li class="up">Phase 2: full retry-chain + A-MPDU</li></ul>`,
+     extra:`<div class="srnote">
+       <div class="sub" style="margin-top:16px">What counts in the Success Ratio — and what should <i>not</i> drive the rate</div>
+       <p class="hint" style="margin-top:0">SR is simply <code>acked ÷ txed</code> over the window. Two very different losses both lower it:
+       <b>SR = (1 − PER) · (1 − collision)</b>. Only one of them is a <i>rate</i> problem.</p>
+       <div class="grid2" style="align-items:start">
+         <div class="flowbox">
+           <svg viewBox="0 0 600 176" role="img" aria-label="Success Ratio decomposition of 100 sent frames">
+             <text x="30" y="20" font-size="11.5" font-weight="800" fill="#1F2A44">100 frames sent (txed) → decomposed by outcome</text>
+             <!-- delivered / acked -->
+             <rect x="30"  y="30" width="319" height="42" rx="3" fill="#2E8B57"/>
+             <text x="189" y="56" text-anchor="middle" font-size="12" font-weight="800" fill="#fff">ACKed · 57</text>
+             <!-- channel / PER loss -->
+             <rect x="349" y="30" width="18"  height="42" fill="#E8820C"/>
+             <!-- collision loss -->
+             <rect x="367" y="30" width="223" height="42" rx="3" fill="#c0392b"/>
+             <text x="478" y="56" text-anchor="middle" font-size="12" font-weight="800" fill="#fff">collision loss · 40</text>
+             <!-- brace: rate signal -->
+             <path d="M30 82 L30 90 L367 90 L367 82" fill="none" stroke="#0071C5" stroke-width="1.5"/>
+             <text x="198" y="106" text-anchor="middle" font-size="10.5" font-weight="800" fill="#0071C5">counts as a RATE signal</text>
+             <text x="198" y="119" text-anchor="middle" font-size="9.6" fill="#334155">lower MCS raises (1−PER) → recovers ACKs</text>
+             <!-- brace: collision -->
+             <path d="M367 82 L367 90 L590 90 L590 82" fill="none" stroke="#c0392b" stroke-width="1.5"/>
+             <text x="478" y="106" text-anchor="middle" font-size="10.5" font-weight="800" fill="#c0392b">rate-INDEPENDENT</text>
+             <text x="478" y="119" text-anchor="middle" font-size="9.6" fill="#334155">same loss at every MCS → downscaling can't help</text>
+             <!-- PER callout -->
+             <line x1="358" y1="30" x2="358" y2="132" stroke="#E8820C" stroke-width="1" stroke-dasharray="3 2"/>
+             <text x="358" y="146" text-anchor="middle" font-size="9.6" font-weight="700" fill="#E8820C">channel/PER · 3</text>
+             <text x="358" y="158" text-anchor="middle" font-size="9" fill="#334155">(rate-dependent)</text>
+             <text x="30" y="172" font-size="9.5" fill="#6b7280">example: PER 5% at the chosen rate, collision 40% → SR = 0.95 × 0.60 = 57%</text>
+           </svg>
+         </div>
+         <div>
+           <table class="pentbl" style="width:100%">
+             <tr><th>Loss type</th><th>In SR?</th><th>Rate-<br>dependent?</th><th>Correct response</th></tr>
+             <tr><td>Channel error (PER — noise/SNR)</td><td class="z">✔ counts</td><td class="z">✔ yes</td><td>down-scale MCS / narrower BW</td></tr>
+             <tr><td>Collision (contention / hidden node)</td><td class="z">✔ counts here</td><td class="n">✘ no</td><td>RTS/CTS protection — <b>hold the rate</b></td></tr>
+             <tr><td>Retries within the A-MPDU chain</td><td class="n">✘ not modeled</td><td>—</td><td>Phase-2 (full retry chain)</td></tr>
+           </table>
+           <p class="hint" style="margin-top:8px"><b>Why it matters:</b> the sim lumps both into one SR, so a collision burst pushes SR below 90% at <i>every</i> rate. The TLC reads that as "too fast" and keeps down-scaling — all the way to MCS 1 — yet SR never recovers (the loss is collisions, not the rate), so throughput collapses far below <code>best</code>. Real firmware separates the two: block-ACK/retry patterns distinguish a collision from a channel error, collision-only losses don't force a down-scale, and RTS/CTS is switched on instead.</p>
+         </div>
+       </div>
+     </div>`},
  B4:{role:"The rate picker under test. STAY scales MCS within the current column (NSS·BW·GI). Periodically a SEARCH cycle tries neighbouring columns and keeps the best by SR × expected throughput. Outputs the rate table + report threshold (search vs dwell). Swap point for the real firmware TLC.",
      io:io(["TLCConfig (configure)","WindowStats + t (on_stats)"],"B4<br>TLC",["LinkQuality { rate_table[], stat_threshold }"],COLOR.B4),
      funcs:funcs([["configure(cfg)","build columns; initial table"],["on_stats(stats,t)","STAY / SEARCH state machine (flow →)"],["_neighbours()","candidate columns for a search cycle"],["_retry_table()","primary + fallbacks + legacy"]]),
      tree:`<div class="sub">state machine</div><ul class="tree"><li><b>STAY</b> — scale MCS in current column</li><li><b>SEARCH</b> — try neighbour columns, keep best</li></ul>
-           <div class="sub" style="margin-top:8px">state (memory)</div><ul class="tree"><li><code>column</code> = (NSS, BW, GI)</li><li><code>mcs</code> — rate within column</li><li><code>sr{}</code> EWMA per (column, mcs)</li><li>success/fail counters → search trigger</li></ul>
+           <div class="sub" style="margin-top:8px">state (memory)</div><ul class="tree"><li><code>column</code> = (NSS, BW, GI)</li><li><code>mcs</code> — rate within column</li><li><code>sr{}</code> IIR-smoothed (EWMA) per (column, mcs)</li><li>success/fail counters → search trigger</li></ul>
            <div class="sub" style="margin-top:8px">search candidates</div><ul class="tree"><li>toggle SISO ↔ MIMO</li><li>± bandwidth step</li><li>toggle GI</li><li>pick max SR × expected_tpt</li></ul>`},
  B5:{role:"Records one row per window and computes the KPIs. (The TLC's own working memory lives in B4; this block is the run log + scoring.)",
      io:io(["Record per window (from B6)"],"B5<br>Results",["CSV file","summary { KPIs }"],COLOR.B5),
@@ -597,14 +943,28 @@ function show(id){
      <div class="grid2">
        <div>${d.funcs}${d.tree}<div class="sub" style="margin-top:12px">Simple example</div>${EXAMPLE[id]}</div>
        <div><div class="sub">Functionality — flow diagram</div>${FLOW[id]}</div>
-     </div>`;
+     </div>
+     ${d.extra||''}`;
   const perEx=document.getElementById('perExplorer'); if(perEx) perEx.style.display = id==='B2'?'':'none';
   const cst=document.getElementById('card_searchTime'); if(cst) cst.style.display = id==='B4'?'':'none';
   const csc=document.getElementById('card_searchCond'); if(csc) csc.style.display = id==='B4'?'':'none';
+  const cd=document.getElementById('card_decisions'); if(cd) cd.style.display='none';
+  const cf=document.getElementById('card_flow'); if(cf) cf.style.display='none';
+  const ctp=document.getElementById('card_txpower'); if(ctp) ctp.style.display='none';
+  const cdet=document.getElementById('card_detail'); if(cdet) cdet.style.display='';
+}
+
+function showExtra(cardId){
+  ['card_detail','perExplorer','card_searchTime','card_searchCond','card_decisions','card_flow','card_txpower'].forEach(x=>{ const e=document.getElementById(x); if(e) e.style.display='none'; });
+  const dc=document.getElementById(cardId); if(dc){ dc.style.display=''; dc.scrollIntoView({behavior:'smooth',block:'start'}); }
 }
 
 function pocGo(id){
-  if(id==='TOP'){ document.querySelectorAll('#poc a').forEach(a=>a.classList.toggle('active',a.dataset.poc==='TOP')); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  const setActive=k=>document.querySelectorAll('#poc a').forEach(a=>a.classList.toggle('active',a.dataset.poc===k));
+  if(id==='TOP'){ setActive('TOP'); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  if(id==='DEC'){ setActive('DEC'); showExtra('card_decisions'); return; }
+  if(id==='FLOW'){ setActive('FLOW'); showExtra('card_flow'); return; }
+  if(id==='TXP'){ setActive('TXP'); showExtra('card_txpower'); return; }
   show(id);
   document.getElementById('detail').scrollIntoView({behavior:'smooth',block:'start'});
 }

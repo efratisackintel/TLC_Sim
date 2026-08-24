@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TLC Simulation — Improvement Ideas</title>
+<style>
+  :root{--blue:#0071C5;--dark:#1F2A44;--green:#2E8B57;--orange:#E8820C;
+        --purple:#7C3AED;--teal:#0E7C86;--grey:#6b7280;--light:#EAF3FB;--red:#c0392b;}
+  *{box-sizing:border-box;font-family:"Segoe UI",system-ui,Arial,sans-serif;}
+  body{margin:0;background:linear-gradient(160deg,#f4f8fc,#e8eef6);color:var(--dark);}
+  header{background:var(--dark);color:#fff;padding:16px 26px;}
+  header h1{margin:0;font-size:23px;}
+  header p{margin:4px 0 0;color:#b9c6d8;font-size:14px;}
+  .wrap{max-width:1160px;margin:0 auto;padding:22px;}
+  .card{background:#fff;border-radius:14px;padding:18px 22px;box-shadow:0 4px 14px rgba(20,40,80,.08);margin-bottom:22px;}
+  h2{color:var(--blue);font-size:17px;margin:0 0 12px;}
+  h3{color:var(--dark);font-size:14px;margin:16px 0 6px;}
+  svg{width:100%;height:auto;display:block;}
+  .hint{font-size:12.5px;color:var(--grey);margin-top:8px;line-height:1.5;}
+  .role{font-size:13.5px;color:#334155;margin:0 0 12px;line-height:1.55;}
+  .file{font-family:Consolas,monospace;font-size:11.5px;color:var(--grey);}
+  code{font-family:Consolas,monospace;color:#0a3d62;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr;}}
+  .sub{font-size:13px;font-weight:800;color:var(--dark);margin:2px 0 8px;}
+  .flowbox{border:1px solid #e6ebf2;border-radius:10px;padding:8px;background:#fcfdff;}
+  .maps{width:100%;border-collapse:collapse;font-size:13px;}
+  .maps th,.maps td{border:1px solid #e2e8f0;padding:7px 10px;text-align:left;vertical-align:top;}
+  .maps th{background:var(--blue);color:#fff;font-weight:600;}
+  .maps tr:nth-child(even){background:#f3f8fd;}
+  table.pentbl{border-collapse:collapse;font-size:11.5px;margin:7px 0 2px;width:100%;}
+  table.pentbl th,table.pentbl td{border:1px solid #e2e8f0;padding:4px 8px;text-align:center;vertical-align:top;}
+  table.pentbl th:first-child,table.pentbl td:first-child{text-align:left;}
+  table.pentbl th{background:#f1f5f9;color:var(--dark);}
+  table.pentbl td.z{color:#166534;font-weight:700;} table.pentbl td.n{color:#b91c1c;font-weight:700;}
+  .badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+         padding:3px 9px;border-radius:20px;margin-left:8px;vertical-align:middle;}
+  .badge.open{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;}
+  .steps{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.6;}
+  .steps li{margin:3px 0;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:7px;font-size:11.5px;font-weight:700;border:1.5px solid #cbd5e1;background:#fbfdff;}
+  .pill.good{border-color:var(--green);color:#1e6b43;background:#eafaf0;}
+  .pill.bad{border-color:var(--red);color:#8f2318;background:#fdecea;}
+  /* --- left POC / table of contents --- */
+  #poc{position:fixed;left:12px;top:90px;width:172px;z-index:60;display:flex;flex-direction:column;gap:6px;}
+  #poc .pochdr{font-size:10px;font-weight:800;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;margin:0 0 2px 2px;}
+  #poc a{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--grey);background:#fff;border:1.5px solid #cbd5e1;
+         border-radius:8px;padding:8px 10px;text-decoration:none;line-height:1.2;}
+  #poc a small{display:block;font-size:10px;font-weight:600;color:#94a3b8;margin-top:2px;}
+  #poc a.active{color:#fff;background:var(--purple);border-color:transparent;}
+  #poc a.active small{color:#e9defb;}
+  @media(max-width:1180px){#poc{position:static;width:auto;flex-direction:row;flex-wrap:wrap;margin:14px 22px 0;}}
+</style>
+</head>
+<body>
+<header>
+  <h1>TLC Simulation — Improvement Ideas</h1>
+  <p>A running backlog of <b>algorithmic</b> improvements for the rate-scaling logic. Pick an idea on the left for the problem, the proposed change, and a visualisation.</p>
+</header>
+
+<nav id="poc">
+  <div class="pochdr">Ideas</div>
+  <a data-poc="I1" onclick="ideaGo('I1')" title="Distinguish collision loss from channel loss" class="active">1 · Handle collision<small>Don't down-scale for contention</small></a>
+</nav>
+
+<div class="wrap">
+
+  <!-- ============================ IDEA 1 ============================ -->
+  <div class="card" id="idea_I1">
+    <h2>Idea 1 — Handle collision <span class="badge open">Open</span></h2>
+    <p class="role"><b>Today (firmware).</b> The RS_MNG rate scaler drives its decision from a single <b>Success Ratio</b> (<code>acked ÷ txed</code>) aggregated over its statistics windows. That SR <b>blends channel loss</b> (rate-dependent) with <b>collision loss</b> (rate-independent) — the firmware does not separate the two causes. So when contention pulls the SR down, RS_MNG can read it as "rate too fast" and trigger the same <b>down-scale / search cycle</b> as a genuine channel fade, even though a lower MCS cannot recover a collision. The idea: <b>detect collision-dominated loss and stop down-scaling for it</b> (protect with RTS/CTS instead).</p>
+
+    <div class="grid2">
+      <div>
+        <div class="sub">The problem in one picture</div>
+        <div class="flowbox">
+          <svg viewBox="0 0 560 240" role="img" aria-label="Throughput during a collision burst: current vs proposed">
+            <!-- axes -->
+            <line x1="46" y1="20" x2="46" y2="180" stroke="#94a3b8" stroke-width="1"/>
+            <line x1="46" y1="180" x2="540" y2="180" stroke="#94a3b8" stroke-width="1"/>
+            <text x="8" y="30" font-size="10" fill="#6b7280">Tput</text>
+            <text x="500" y="196" font-size="10" fill="#6b7280">time</text>
+            <!-- collision-burst shaded region -->
+            <rect x="210" y="20" width="180" height="160" fill="#fdecea" stroke="#f3b8b0" stroke-dasharray="3 2"/>
+            <text x="300" y="34" text-anchor="middle" font-size="10.5" font-weight="800" fill="#c0392b">collision burst (40%)</text>
+            <!-- best (genie) line -->
+            <polyline points="46,58 210,58 300,104 390,104 540,58" fill="none" stroke="#7C3AED" stroke-width="2.4" stroke-dasharray="6 4"/>
+            <text x="120" y="52" font-size="10" font-weight="700" fill="#5b21b6">best (genie)</text>
+            <!-- proposed: hold rate, ride the collision hit -->
+            <polyline points="46,60 210,60 300,106 390,106 540,60" fill="none" stroke="#2E8B57" stroke-width="2.6"/>
+            <text x="410" y="120" font-size="10" font-weight="800" fill="#1e6b43">proposed — hold rate + RTS</text>
+            <!-- current: collapses to MCS1 -->
+            <polyline points="46,62 210,62 240,120 270,150 300,164 390,164 420,120 450,66 540,62" fill="none" stroke="#c0392b" stroke-width="2.6"/>
+            <text x="238" y="176" font-size="10" font-weight="800" fill="#c0392b">current — down-scales to MCS 1</text>
+            <circle cx="345" cy="164" r="3.2" fill="#c0392b"/>
+            <text x="345" y="150" text-anchor="middle" font-size="9.5" fill="#c0392b">≈147 Mbps</text>
+          </svg>
+          <p class="hint" style="margin-top:6px">During the burst SR = (1−PER)·(1−0.40) = 0.6 at <i>every</i> MCS. Since 0.6 &lt; 90%, the current logic keeps dropping MCS — but SR never recovers (loss is collisions), so it bottoms out at MCS 1. The proposed logic recognises the loss is rate-independent, <b>holds</b> the top rate, and just rides the collision hit — tracking <span class="pill good">best</span>.</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="sub">Proposed algorithm change</div>
+        <ol class="steps">
+          <li><b>Split the signal.</b> Keep the throughput on the blended SR, but drive the <b>rate decision</b> on the <i>channel</i> part only: <code>SR_rate = 1 − PER</code>, estimated from the loss that is <b>correlated across rates</b>.</li>
+          <li><b>Detect collision-dominated loss.</b> If failures are (a) roughly <b>equal at high and low MCS</b>, (b) <b>all-or-nothing</b> per A-MPDU (BA bitmap), and (c) the medium was <b>busy/again busy</b> around TX (CCA) — classify as contention, not channel.</li>
+          <li><b>Don't down-scale for it.</b> On collision-classified loss: <b>hold</b> the current column/MCS (no forced decrease, no search cycle), and…</li>
+          <li><b>Protect instead.</b> Turn on <b>RTS/CTS</b> (or raise its threshold) to shrink the collision window; keep the high rate for the data.</li>
+          <li><b>Still react to real fades.</b> If loss <b>grows as MCS rises</b> (rate-correlated) or RSSI drops → treat as channel and down-scale as usual.</li>
+        </ol>
+
+        <h3>How to tell the two apart</h3>
+        <table class="pentbl">
+          <tr><th>Signal</th><th>Collision</th><th>Bad rate / channel</th></tr>
+          <tr><td>Loss vs MCS</td><td class="n">flat (rate-independent)</td><td class="z">grows with MCS</td></tr>
+          <tr><td>BA bitmap</td><td class="n">whole A-MPDU lost</td><td class="z">partial / scattered</td></tr>
+          <tr><td>CCA at TX</td><td class="n">medium busy</td><td class="z">medium clear</td></tr>
+          <tr><td>RSSI trend</td><td class="z">still strong</td><td class="n">dropping</td></tr>
+          <tr><td>Right response</td><td class="n">RTS/CTS, hold rate</td><td class="z">down-scale MCS/BW</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <h3>Expected impact</h3>
+    <div class="flowbox">
+      <table class="maps">
+        <tr><th>Scenario</th><th>Current</th><th>With idea 1</th></tr>
+        <tr><td>Collision burst (SNR steady, 40% contention)</td><td><span class="pill bad">collapses to ≈147 Mbps</span> (MCS 1)</td><td><span class="pill good">tracks best ≈2900 Mbps</span> (holds MCS 13 + RTS)</td></tr>
+        <tr><td>Genuine fade (SNR drops)</td><td>down-scales (correct)</td><td>down-scales (unchanged)</td></tr>
+        <tr><td>Mixed fade + contention</td><td>over-reacts, slow recovery</td><td>separates causes → faster, closer to best</td></tr>
+      </table>
+    </div>
+    <p class="hint">Reference: the loss decomposition this builds on is shown in the <b>Architecture ▸ B3 · TX Emulator</b> block ("What counts in the Success Ratio"). Real firmware already leans on BA-bitmap patterns, CCA and RTS/CTS to make this distinction.</p>
+
+    <h3>Test — validate under a collision scenario</h3>
+    <div class="flowbox">
+      <p class="hint" style="margin-top:0"><b>Setup.</b> Hold SNR constant (so the channel is <i>not</i> the variable) and inject a mid-run collision burst. Use the <b>Simulation</b> tab preset <span class="pill">interference burst</span> — or these segments (<code>ms, SNR, SNR_end, collision</code>):</p>
+      <table class="pentbl" style="max-width:520px">
+        <tr><th>Phase</th><th>Duration</th><th>SNR</th><th>Collision</th><th>Expectation</th></tr>
+        <tr><td>Before</td><td>1700 ms</td><td>40 dB</td><td>0.02</td><td>top rate (MCS 13, 320, MIMO)</td></tr>
+        <tr><td><b>Burst</b></td><td>1700 ms</td><td>40 dB</td><td class="n">0.40</td><td>the discriminating phase</td></tr>
+        <tr><td>After</td><td>1600 ms</td><td>40 dB</td><td>0.02</td><td>recover to top rate</td></tr>
+      </table>
+      <p class="hint">Run it twice — <b>A</b>: collision-aware OFF (FW-faithful baseline); <b>B</b>: collision-aware ON (idea 1). Compare the two over the burst window (zoom the charts to 1700–3400 ms).</p>
+
+      <div class="sub" style="margin-top:10px">Pass / fail criteria (during the burst)</div>
+      <table class="maps">
+        <tr><th>Metric</th><th>A · baseline (expected)</th><th>B · idea 1 (target)</th><th>Pass if…</th></tr>
+        <tr><td>MCS held</td><td>collapses toward MCS 1</td><td>stays at/near MCS 13</td><td>B stays ≥ MCS 11</td></tr>
+        <tr><td>Achieved ÷ best</td><td><span class="pill bad">≈ 5%</span> (≈147 / ≈2900)</td><td><span class="pill good">≈ 100%</span></td><td>B efficiency ≥ 90%</td></tr>
+        <tr><td>Search cycles in burst</td><td>many (churn)</td><td>≈ 0 (holds column)</td><td>B triggers no down-scale search</td></tr>
+        <tr><td>RTS during burst</td><td>as-is</td><td>ON</td><td>B enables RTS while contention is detected</td></tr>
+        <tr><td>Recovery after burst</td><td>slow crawl back up</td><td>immediate (never left top)</td><td>B back to top ≤ 1 window</td></tr>
+      </table>
+
+      <div class="sub" style="margin-top:10px">Control checks (must not regress)</div>
+      <ul class="steps">
+        <li><b>Genuine fade:</b> drop SNR (no collision) → B must still down-scale exactly like A (no false "collision" hold).</li>
+        <li><b>Clean link:</b> SNR high, collision 0 → A and B identical (idea 1 is inert when there's no contention).</li>
+        <li><b>Mixed:</b> fade <i>and</i> collision together → B separates causes: down-scale for the fade, but no <i>extra</i> collapse from the collision.</li>
+      </ul>
+      <p class="hint" style="margin-top:6px"><b>Automation hook (Python):</b> add a <code>tests/test_collision.py</code> that runs the harness on the segments above with <code>collision_aware=False/True</code> and asserts <code>eff_burst_B ≥ 0.90</code>, <code>eff_burst_A ≤ 0.20</code>, and <code>min_mcs_B ≥ 11</code> — so the improvement is guarded by CI, not just eyeballed.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function ideaGo(id){
+  document.querySelectorAll('#poc a').forEach(a=>a.classList.toggle('active',a.dataset.poc===id));
+  const el=document.getElementById('idea_'+id);
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+</script>
+</body>
+</html>
