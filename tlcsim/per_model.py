@@ -9,17 +9,28 @@ SNR. Outside a curve's swept range the value saturates to 1.0 (100% PER) below a
 LUT key = "bw,mcs,nss,gi08"  (gi08: 1 = 0.8us short GI, 0 = 3.2us long GI).
 """
 from __future__ import annotations
+import math
 import os
 from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .rates import Rate
+from .rates import Rate, expected_tpt
 from .channel import ChannelState
 
 _LUT_PATH = os.path.join(os.path.dirname(__file__), "data", "per_lut.npz")
 _CURVES: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = None
 _META: Optional[Dict[str, Tuple[float, float]]] = None   # key -> (snr_sens, per_target)
+
+# --- Synthetic delay-spread (ISI) model -----------------------------------
+# The measured PER curves are AWGN only (no multipath). To let channel length
+# matter we layer a SYNTHETIC (non-empirical) inter-symbol-interference penalty:
+# when the RMS delay spread tau exceeds the guard interval (GI), part of each
+# symbol's energy leaks into the next one -> an SNR penalty plus an irreducible
+# PER floor. No effect while the GI covers tau (tau <= GI).
+ISI_SNR_PENALTY_DB = 6.0   # dB SNR shift per unit of excess ratio (tau/GI - 1)
+ISI_FLOOR_MAX = 0.5        # max irreducible PER floor from ISI
+ISI_FLOOR_SCALE = 1.0      # how fast the floor saturates with excess
 
 
 def _load():
@@ -67,8 +78,70 @@ def phy_per(r: Rate, snr_db: float) -> float:
     return float(np.interp(snr_db, x, y, left=1.0, right=0.0))
 
 
+def _gi_us(r: Rate) -> float:
+    """Guard interval of a rate in microseconds (sim models 0.8 or 3.2 us)."""
+    return 0.8 if r.gi08 else 3.2
+
+
+def isi_penalty(gi_us: float, tau_us: float) -> Tuple[float, float]:
+    """Synthetic (NON-empirical) delay-spread effect: returns (snr_penalty_db, per_floor).
+
+    No effect while the guard interval covers the delay spread (tau <= GI). When
+    tau > GI the excess ratio drives an SNR penalty and an irreducible PER floor."""
+    if tau_us <= 0.0 or gi_us <= 0.0:
+        return 0.0, 0.0
+    excess = tau_us / gi_us - 1.0                # delay spread beyond the guard
+    if excess <= 0.0:
+        return 0.0, 0.0
+    snr_pen = ISI_SNR_PENALTY_DB * excess
+    floor = ISI_FLOOR_MAX * (1.0 - math.exp(-excess / ISI_FLOOR_SCALE))
+    return snr_pen, floor
+
+
 def per(rate: Rate, ch: ChannelState) -> float:
-    """Probability a transmission at `rate` fails on channel `ch` (0..1). Data-driven."""
-    p = phy_per(rate, ch.snr_db)
+    """Probability a transmission at `rate` fails on channel `ch` (0..1). Data-driven
+    AWGN PER + synthetic delay-spread ISI penalty + collision."""
+    tau = getattr(ch, "delay_spread_us", 0.0)
+    snr_pen, floor = isi_penalty(_gi_us(rate), tau) if tau > 0.0 else (0.0, 0.0)
+    p = phy_per(rate, ch.snr_db - snr_pen)
+    if floor > 0.0:
+        p = max(p, floor)
     p_success = (1.0 - p) * (1.0 - ch.collision)
     return max(0.0, min(1.0, 1.0 - p_success))
+
+
+def retry_chain(p: Rate, base: Rate = None):
+    """Retry table (FW _rsMngBuildRatesTbl): entry 0 = the sent (test) rate; the fallback
+    ladder is built from the STABLE column (`base`) — during a search cycle that is the
+    pre-search committed rate, not the test column. For dwell/upscale base = primary."""
+    b = base if base is not None else p
+    chain = [p]                                            # entry 0 = sent (test) rate
+    if b != p:
+        chain.append(b)                                   # stable rate as first fallback (search)
+    if b.mcs >= 1:
+        chain.append(Rate(b.mcs - 1, b.nss, b.bw, b.gi08))
+    if b.mcs >= 2:
+        chain.append(Rate(b.mcs - 2, b.nss, b.bw, b.gi08))
+    chain.append(Rate(0, 1, b.bw, False))     # robust: SISO, long GI
+    chain.append(Rate(0, 1, 20, False))       # legacy-ish: 20 MHz, most robust
+    return chain
+
+
+def retry_tput(p: Rate, base: Rate, ch: ChannelState, frame_bits: float):
+    """Airtime-based delivery through the retry chain: a failed primary is redelivered at a
+    fallback rate, so throughput dips to ~the fallback rate (not zero).
+    Returns (tput_mbps, airtime_s_per_frame, first_attempt_fail)."""
+    reach, e_t, deliv, first_fail = 1.0, 0.0, 0.0, 0.0
+    for k, r in enumerate(retry_chain(p, base)):
+        fail = per(r, ch)
+        phy = expected_tpt(r)
+        t_r = frame_bits / (phy * 1e6) if phy > 0 else 1e6
+        e_t += reach * t_r
+        deliv += reach * (1.0 - fail)
+        if k == 0:
+            first_fail = fail
+        reach *= fail
+        if reach < 1e-4:
+            break
+    tput = (deliv * frame_bits) / e_t / 1e6 if e_t > 0 else 0.0
+    return tput, e_t, first_fail

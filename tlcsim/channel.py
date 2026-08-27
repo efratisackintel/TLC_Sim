@@ -10,20 +10,37 @@ from typing import List, Optional, Sequence
 
 SNR_MIN, SNR_MAX = -20.0, 60.0
 
+# Named channel profiles -> RMS delay spread (us). Synthetic teaching values, not empirical.
+PROFILES = {"awgn": 0.0, "small room": 0.5, "office": 1.0, "outdoor": 3.0}
+
 
 @dataclass
 class ChannelState:
-    snr_db: float     # link SNR in dB (higher = cleaner link)
-    collision: float  # 0..1 (probability a TX is lost to collision/interference)
+    snr_db: float           # link SNR in dB (higher = cleaner link)
+    collision: float        # 0..1 (probability a TX is lost to collision/interference)
+    delay_spread_us: float = 0.0  # RMS delay spread (us); 0 = AWGN / no multipath
 
 
 @dataclass
 class Seg:
-    """One scenario segment. Constant `snr_db`, or a linear ramp to `snr_end`."""
+    """One scenario segment. Constant `snr_db`, or a linear ramp to `snr_end`.
+
+    Delay spread is a channel property (constant over the segment). Give it directly
+    via `delay_spread_us`, or by name via `profile` (see PROFILES)."""
     ms: float
     snr_db: float
     snr_end: Optional[float] = None
     collision: float = 0.0
+    delay_spread_us: float = 0.0
+    profile: Optional[str] = None
+
+    def __post_init__(self):
+        if self.profile is not None:
+            key = self.profile.strip().lower()
+            if key not in PROFILES:
+                raise ValueError(
+                    f"unknown channel profile {self.profile!r}; choose from {list(PROFILES)}")
+            self.delay_spread_us = PROFILES[key]
 
 
 class Channel:
@@ -46,7 +63,8 @@ class Channel:
             if t < acc + s.ms:
                 frac = (t - acc) / s.ms if s.ms else 0.0
                 v = s.snr_db if s.snr_end is None else s.snr_db + (s.snr_end - s.snr_db) * frac
-                return ChannelState(max(SNR_MIN, min(SNR_MAX, v)), s.collision)
+                return ChannelState(max(SNR_MIN, min(SNR_MAX, v)), s.collision, s.delay_spread_us)
             acc += s.ms
         s = self.segments[-1]
-        return ChannelState(s.snr_end if s.snr_end is not None else s.snr_db, s.collision)
+        return ChannelState(s.snr_end if s.snr_end is not None else s.snr_db,
+                            s.collision, s.delay_spread_us)

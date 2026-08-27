@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PPMCS — the main idea</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #182033;
+    --panel2: #1f2942;
+    --ink: #e8edf7;
+    --muted: #9aa7c2;
+    --accent: #4fd1c5;
+    --accent2: #f6ad55;
+    --base: #3f5a86;
+    --limit: #e05561;
+    --grid: #2a3550;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.5;
+  }
+  header {
+    padding: 22px 28px; background: linear-gradient(120deg,#141b2c,#1c2740);
+    border-bottom: 1px solid var(--grid);
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 22px 28px 60px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--grid);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 10px; font-size: 16px; color: var(--accent); }
+  .lead { color: var(--muted); font-size: 14px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 16px; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .ctl label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  select {
+    background: var(--panel2); color: var(--ink); border: 1px solid var(--grid);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px;
+  }
+  .pathpills { display: flex; gap: 8px; }
+  .pill {
+    padding: 8px 14px; border-radius: 20px; border: 1px solid var(--grid);
+    background: var(--panel2); cursor: pointer; font-size: 14px; user-select: none;
+  }
+  .pill.active { background: var(--accent); color: #06231f; border-color: var(--accent); font-weight: 600; }
+  canvas { width: 100%; height: 340px; display: block; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+  .formula {
+    background: var(--panel2); border-left: 3px solid var(--accent2);
+    padding: 10px 14px; border-radius: 6px; font-family: "Consolas", monospace;
+    font-size: 14px; margin-top: 12px;
+  }
+  .dims { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; }
+  .dim { background: var(--panel2); border-radius: 10px; padding: 12px 14px; }
+  .dim b { color: var(--accent); }
+  .dim small { color: var(--muted); }
+  .offrow { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .offrow span.n { width: 46px; color: var(--muted); }
+  input[type=range] { flex: 1; accent-color: var(--accent2); }
+  input[type=range]:disabled { opacity: .35; }
+  .val { width: 60px; text-align: right; font-family: monospace; color: var(--accent2); }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .readout { font-family: monospace; font-size: 13px; color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>PPMCS — Per‑Path, Per‑MCS power table</h1>
+  <p>A tiny interactive model to grasp the main idea. Not real firmware values — just the concept.</p>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>The idea in one line</h2>
+    <p class="lead">
+      The radio has an <b>absolute power limit</b> per channel (from regulatory / SAR / TAS tables).
+      <b>PPMCS</b> adds a small <b>per‑MCS offset</b> on top of it — because higher, denser MCS rates
+      need to be backed off a bit to stay clean. The final TX power for each rate is:
+    </p>
+    <div class="formula">final_power[MCS] = base_limit(band, channel) &nbsp;+&nbsp; PPMCS_offset(path, BW, sub‑band, MCS)</div>
+    <div class="dims" style="margin-top:14px">
+      <div class="dim"><b>Path</b><br><small>Antenna chain A or B</small></div>
+      <div class="dim"><b>Bandwidth</b><br><small>2 / 20 / 40 / 80… MHz</small></div>
+      <div class="dim"><b>Band + sub‑band</b><br><small>LB 2.4G · HB 5G · UHB 6G, split into channel groups</small></div>
+      <div class="dim"><b>MCS</b><br><small>Rate index 0 → 13</small></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Pick a slice of the table</h2>
+    <div class="controls">
+      <div class="ctl">
+        <label>Antenna path</label>
+        <div class="pathpills" id="paths">
+          <div class="pill active" data-path="A">Path A</div>
+          <div class="pill" data-path="B">Path B</div>
+        </div>
+      </div>
+      <div class="ctl">
+        <label>Bandwidth</label>
+        <select id="bw">
+          <option value="2">2 MHz</option>
+          <option value="20" selected>20 MHz</option>
+          <option value="40">40 MHz</option>
+          <option value="80">80 MHz</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label>Band / sub‑band</label>
+        <select id="band">
+          <option value="LB">LB · 2.4 GHz · ch 1‑6</option>
+          <option value="HB" selected>HB · 5 GHz · ch 36‑64</option>
+          <option value="UHB">UHB · 6 GHz · ch 1‑21</option>
+        </select>
+      </div>
+    </div>
+    <div class="note" id="slice">Showing: Path A · 20 MHz · HB (5 GHz)</div>
+  </div>
+
+  <div class="card">
+    <h2>Per‑MCS power</h2>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><span class="swatch" style="background:#e05561"></span>Absolute base limit</span>
+      <span><span class="swatch" style="background:#4fd1c5"></span>Final power (base + PPMCS offset)</span>
+      <span><span class="swatch" style="background:#f6ad55"></span>PPMCS offset (the table's job)</span>
+    </div>
+    <div class="readout" id="readout" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Tune the PPMCS offsets (this slice)</h2>
+    <p class="lead">These 14 numbers are exactly what one PPMCS cell‑row stores. Drag to see the final power change.
+      Offsets are negative (a back‑off), just like real tables.</p>
+    <div id="sliders"></div>
+    <div class="note">In the real firmware each cell is 8 bits per MCS with a fine step (~sub‑dB); here we use dB for clarity.</div>
+  </div>
+
+</div>
+
+<script>
+// ---- tiny model -----------------------------------------------------------
+// Absolute base limit depends on band + bandwidth (wider BW -> lower per-signal cap).
+const BAND_BASE = { LB: 20, HB: 23, UHB: 21 };      // dBm-ish, illustrative
+const BW_PENALTY = { "2": +1, "20": 0, "40": -1.5, "80": -3 };
+
+// PPMCS offsets: per path, per BW, per band, per MCS (0..13). Negative = back-off.
+// Auto-generated illustrative curve: higher/denser MCS -> more back-off.
+function defaultOffsets(path, bw, band) {
+  const pathBias = path === "B" ? -0.4 : 0;          // path B slightly different calibration
+  const bwBias = ({ "2": 0, "20": 0, "40": -0.3, "80": -0.6 })[bw];
+  const bandBias = ({ LB: 0, HB: -0.2, UHB: -0.5 })[band];
+  const arr = [];
+  for (let m = 0; m <= 13; m++) {
+    // gentle for low MCS, steeper for the dense top rates (11-13)
+    let off = -(m * 0.25) - (m >= 11 ? (m - 10) * 0.8 : 0);
+    off += pathBias + bwBias + bandBias;
+    arr.push(Math.round(off * 4) / 4);               // quantize to 0.25 dB steps
+  }
+  return arr;
+}
+
+let state = { path: "A", bw: "20", band: "HB", offsets: [] };
+
+function baseLimit() {
+  return BAND_BASE[state.band] + BW_PENALTY[state.bw];
+}
+
+// ---- UI wiring ------------------------------------------------------------
+const paths = document.getElementById("paths");
+const bwSel = document.getElementById("bw");
+const bandSel = document.getElementById("band");
+const sliceEl = document.getElementById("slice");
+const slidersEl = document.getElementById("sliders");
+const readoutEl = document.getElementById("readout");
+
+paths.addEventListener("click", e => {
+  const p = e.target.closest(".pill"); if (!p) return;
+  [...paths.children].forEach(c => c.classList.remove("active"));
+  p.classList.add("active");
+  state.path = p.dataset.path; reset();
+});
+bwSel.addEventListener("change", () => { state.bw = bwSel.value; reset(); });
+bandSel.addEventListener("change", () => { state.band = bandSel.value; reset(); });
+
+function reset() {
+  state.offsets = defaultOffsets(state.path, state.bw, state.band);
+  const bandName = { LB: "LB (2.4 GHz)", HB: "HB (5 GHz)", UHB: "UHB (6 GHz)" }[state.band];
+  sliceEl.textContent = `Showing: Path ${state.path} · ${state.bw} MHz · ${bandName}`;
+  buildSliders();
+  draw();
+}
+
+function buildSliders() {
+  slidersEl.innerHTML = "";
+  state.offsets.forEach((v, m) => {
+    const row = document.createElement("div"); row.className = "offrow";
+    const name = document.createElement("span"); name.className = "n"; name.textContent = "MCS" + m;
+    const rng = document.createElement("input");
+    rng.type = "range"; rng.min = "-8"; rng.max = "0"; rng.step = "0.25"; rng.value = v;
+    const val = document.createElement("span"); val.className = "val"; val.textContent = v.toFixed(2) + " dB";
+    rng.addEventListener("input", () => {
+      state.offsets[m] = parseFloat(rng.value);
+      val.textContent = state.offsets[m].toFixed(2) + " dB";
+      draw();
+    });
+    row.append(name, rng, val);
+    slidersEl.appendChild(row);
+  });
+}
+
+// ---- chart ----------------------------------------------------------------
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const base = baseLimit();
+  const finals = state.offsets.map(o => base + o);
+  const yMax = base + 2;
+  const yMin = Math.min(...finals) - 2;
+  const padL = 44, padR = 12, padT = 14, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = 14;
+  const bandW = plotW / n;
+  const y = v => padT + plotH * (1 - (v - yMin) / (yMax - yMin));
+
+  // gridlines + y labels
+  ctx.strokeStyle = "#2a3550"; ctx.fillStyle = "#9aa7c2";
+  ctx.font = "11px monospace"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  const step = 2;
+  for (let v = Math.ceil(yMin); v <= yMax; v += step) {
+    const yy = y(v);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillText(v + "", padL - 6, yy);
+  }
+
+  // base limit line
+  ctx.strokeStyle = "#e05561"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.moveTo(padL, y(base)); ctx.lineTo(W - padR, y(base)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // bars: final power, with offset drop marked
+  for (let m = 0; m < n; m++) {
+    const cx = padL + bandW * m + bandW / 2;
+    const bw2 = bandW * 0.5;
+    const yf = y(finals[m]);
+    const yb = y(base);
+    // offset segment (base -> final) in orange
+    ctx.strokeStyle = "#f6ad55"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, yb); ctx.lineTo(cx, yf); ctx.stroke();
+    // final bar
+    ctx.fillStyle = "#4fd1c5";
+    ctx.fillRect(cx - bw2 / 2, yf, bw2, y(yMin) - yf);
+    // marker dot at final
+    ctx.fillStyle = "#4fd1c5";
+    ctx.beginPath(); ctx.arc(cx, yf, 3, 0, Math.PI * 2); ctx.fill();
+    // x label
+    ctx.fillStyle = "#9aa7c2"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.font = "10px monospace";
+    ctx.fillText(m + "", cx, H - padB + 6);
+  }
+  // axis titles
+  ctx.fillStyle = "#9aa7c2"; ctx.textAlign = "center";
+  ctx.fillText("MCS index", padL + plotW / 2, H - 12);
+
+  // readout
+  const worst = Math.min(...finals);
+  readoutEl.innerHTML =
+    `Base limit = <b style="color:#e05561">${base.toFixed(2)} dBm</b> &nbsp;·&nbsp; ` +
+    `MCS0 final = <b style="color:#4fd1c5">${finals[0].toFixed(2)}</b> &nbsp;·&nbsp; ` +
+    `MCS13 final = <b style="color:#4fd1c5">${finals[13].toFixed(2)}</b> &nbsp;·&nbsp; ` +
+    `biggest back‑off = <b style="color:#f6ad55">${(worst - base).toFixed(2)} dB</b>`;
+}
+
+window.addEventListener("resize", draw);
+reset();
+</script>
+</body>
+</html>

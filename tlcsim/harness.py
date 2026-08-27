@@ -4,7 +4,7 @@ from typing import List, Optional
 import random
 from .rates import Rate, expected_tpt, all_rates
 from .channel import Channel, ChannelState
-from .per_model import per
+from .per_model import per, retry_tput
 from .emulator import simulate_window
 from .tlc import TLC, ReferenceTLC, TLCConfig
 from .results import Record, RunResult
@@ -38,10 +38,10 @@ def run_sim(channel: Channel, tlc: Optional[TLC] = None, config: Optional[TLCCon
         ch = channel.state(t)
         stats = simulate_window(lq.rate_table, ch, lq.stat_threshold, monte_carlo, rng)
         p = lq.primary
-        phy = expected_tpt(p)                                            # Mbps
-        dt_ms = (lq.stat_threshold * frame_bytes * 8 / (phy * 1e6) * 1000) if phy > 0 else 1.0
+        tput, e_t, _rty = retry_tput(p, getattr(lq, "stable", None), ch, frame_bytes * 8)   # retry: fallbacks from the stable column
+        dt_ms = (lq.stat_threshold * e_t * 1000) if e_t > 0 else 1.0
         res.records.append(Record(t, dt_ms, str(p), p.mcs, p.nss, p.bw, ch.snr_db, ch.collision,
-                                  stats.sr, phy * stats.sr, _best_tpt(ch, cands),
+                                  stats.sr, tput, _best_tpt(ch, cands),
                                   getattr(tlc, "mode", "-"), getattr(tlc, "state", "-")))
         lq = tlc.on_stats(stats, t)
         t += dt_ms

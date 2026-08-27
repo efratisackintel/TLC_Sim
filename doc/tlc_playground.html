@@ -118,6 +118,15 @@
       <option value="6" selected>6 GHz</option>
     </select>
 
+    <label>Channel profile (delay spread)
+      <span class="tip">i<span class="tt">Multipath <b>RMS delay spread τ</b>. When τ exceeds the guard interval, echoes leak between symbols → an <b>SNR penalty + PER floor</b> (so a longer GI can win). <b>small room</b> 0.5µs · <b>office</b> 1µs · <b>outdoor</b> 3µs. <b>Synthetic</b> model — see Architecture · B2. GI is 0.8/3.2µs only; outdoor forces the long GI, office is borderline.</span></span></label>
+    <select id="profile" onchange="onProfileChange()">
+      <option value="awgn" selected>AWGN (τ = 0)</option>
+      <option value="small room">Small room (τ = 0.5µs)</option>
+      <option value="office">Office (τ = 1µs)</option>
+      <option value="outdoor">Outdoor (τ = 3µs)</option>
+    </select>
+
     <label>Max bandwidth the device allows
       <span class="tip">i<span class="tt">Upper limit on channel width TLC may pick. <b>Wider = more throughput</b>, but energy spreads thinner so each rate gets a lower Success Ratio.</span></span></label>
     <select id="bw">
@@ -226,7 +235,7 @@
   <div>
     <div class="card">
       <h2>Channel scenario</h2>
-      <div class="hint" style="margin-bottom:6px;">Each line: <code>ms, SNR[, SNR_end[, collision]]</code>. Set <b>SNR_end</b> for a linear ramp; collision is a 0–1 fraction. Uses the Live tab's Max BW / Antennas / PSD settings.</div>
+      <div class="hint" style="margin-bottom:6px;">Each line: <code>ms, SNR[, SNR_end[, collision[, profile]]]</code>. Set <b>SNR_end</b> for a linear ramp; collision is a 0–1 fraction; <b>profile</b> = <code>awgn</code> / <code>small room</code> / <code>office</code> / <code>outdoor</code> (or a τ in µs) — omit to use the Live tab's Channel profile. Uses the Live tab's Max BW / Antennas / PSD settings.</div>
       <div class="scen" id="scnPresets"></div>
       <textarea id="segs" spellcheck="false" style="width:100%;height:120px;margin-top:10px;font-family:Consolas,monospace;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;box-sizing:border-box;">1700, 40
 1700, 40, 6
@@ -244,7 +253,7 @@
   <div>
     <div class="card">
       <h2>0 · Throughput over time — achieved vs best</h2>
-      <div class="hint">Green step = achieved (SR × rate) · purple = best possible · teal dashed = avg over last 500 ms · amber = SEARCH (numbered). <b>Drag on any chart to zoom all four; double-click to reset.</b></div>
+      <div class="hint">Green step = achieved · <b style="color:#c0392b">red = retry table backfilling failed frames at a fallback rate</b> · purple = best possible · teal dashed = avg over last 100 ms · amber = SEARCH (numbered). <b>Drag on any chart to zoom them all; double-click to reset.</b></div>
       <canvas id="scnTpt" width="900" height="175" style="width:100%;"></canvas>
     </div>
     <div class="card" style="margin-top:16px;">
@@ -261,6 +270,11 @@
       <h2>3 · TLC decision — streams (SISO/MIMO) &amp; channel SNR</h2>
       <div class="hint">Blue = committed streams (PR) · orange = streams tried during a SEARCH · purple dashed = genie-best · grey dotted = SNR (right).</div>
       <canvas id="scnNss" width="900" height="150" style="width:100%;"></canvas>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h2>4 · TLC decision — GI &amp; channel SNR</h2>
+      <div class="hint">Blue = committed guard interval (PR) · orange = GI tried during a SEARCH · purple dashed = genie-best GI · grey dotted = SNR (right). Longer GI (3.2µs) is favoured only when the channel profile's delay spread exceeds the short GI.</div>
+      <canvas id="scnGi" width="900" height="150" style="width:100%;"></canvas>
     </div>
   </div>
 </div>
@@ -292,16 +306,32 @@ function psdPenDb(bw){ const c=document.getElementById('psd'); if(!(c&&c.checked
   return 0;                                                    // 6 GHz: PSD-limited → no penalty
 }
 
+// Synthetic delay-spread (ISI) model — mirrors tlcsim/per_model.py (NOT empirical).
+const PROFILE_TAU = {'awgn':0.0,'small room':0.5,'office':1.0,'outdoor':3.0};
+const ISI_SNR_PENALTY_DB=6.0, ISI_FLOOR_MAX=0.5, ISI_FLOOR_SCALE=1.0;
+function selTau(){ const s=document.getElementById('profile'); return s?(PROFILE_TAU[s.value]||0):0; }
+let TAU_OVERRIDE=null;                          // set per-segment by runScenario; null -> use the selector
+function curTau(){ return TAU_OVERRIDE!==null?TAU_OVERRIDE:selTau(); }
+function giUs(gi08){ return gi08?0.8:3.2; }
+function isiPenalty(gi_us, tau){
+  if(tau<=0 || gi_us<=0) return {pen:0, floor:0};
+  const excess = tau/gi_us - 1;                 // delay spread beyond the guard
+  if(excess<=0) return {pen:0, floor:0};
+  return {pen: ISI_SNR_PENALTY_DB*excess, floor: ISI_FLOOR_MAX*(1-Math.exp(-excess/ISI_FLOOR_SCALE))};
+}
+
 // PER from the measured curve at this SNR (saturate: 100% below sweep, 0% above) — same as B2.
 function perLookup(bw,mcs,nss,gi08,snr){
   const e = PER_LUT[bw+','+mcs+','+nss+','+(gi08?1:0)];
   if(!e) return 1;                             // no measured curve -> rate unusable
-  const snrE = snr - psdPenDb(bw);             // fixed total power: wider BW = less per-tone SNR
+  const isi = isiPenalty(giUs(gi08), curTau());
+  const snrE = snr - psdPenDb(bw) - isi.pen;   // fixed total power + delay-spread ISI penalty
   const s=e.s, p=e.p, n=s.length;
-  if(snrE < s[0])   return 1;
-  if(snrE > s[n-1]) return 0;
-  for(let i=1;i<n;i++){ if(snrE<=s[i]){ const t=(snrE-s[i-1])/(s[i]-s[i-1]); return p[i-1]+t*(p[i]-p[i-1]); } }
-  return p[n-1];
+  let per;
+  if(snrE < s[0])      per=1;
+  else if(snrE > s[n-1]) per=0;
+  else { per=p[n-1]; for(let i=1;i<n;i++){ if(snrE<=s[i]){ const t=(snrE-s[i-1])/(s[i]-s[i-1]); per=p[i-1]+t*(p[i]-p[i-1]); break; } } }
+  return Math.max(per, isi.floor);             // irreducible ISI floor when τ > GI
 }
 
 function predictSR(mcs,nss,bw,gi08,snr,intf){
@@ -311,6 +341,35 @@ function predictSR(mcs,nss,bw,gi08,snr,intf){
 }
 function peakTpt(mcs,nss,bw,gi08){
   return BASE_TPT[mcs]*BW_FACTOR[bw]*(nss==2?2:1)*(gi08?GI_FACTOR:GI32_FACTOR);
+}
+
+// Retry table (FW _rsMngBuildRatesTbl): entry 0 = the sent rate (the test rate during a probe);
+// the fallback ladder is built from the STABLE column — during a search cycle that is the
+// pre-search committed rate, not the test column. For dwell/upscale the base is the primary.
+function retryChain(p, base){
+  const b = base || p;
+  const chain=[{bw:p.bw,mcs:p.mcs,nss:p.nss,gi08:p.gi08}];     // entry 0 = sent (test) rate
+  const same = b.bw===p.bw && b.mcs===p.mcs && b.nss===p.nss && b.gi08===p.gi08;
+  if(!same) chain.push({bw:b.bw,mcs:b.mcs,nss:b.nss,gi08:b.gi08});   // stable rate as first fallback (search)
+  if(b.mcs>=1) chain.push({bw:b.bw,mcs:b.mcs-1,nss:b.nss,gi08:b.gi08});
+  if(b.mcs>=2) chain.push({bw:b.bw,mcs:b.mcs-2,nss:b.nss,gi08:b.gi08});
+  chain.push({bw:b.bw,mcs:0,nss:1,gi08:false});   // robust: SISO, long GI
+  chain.push({bw:20,mcs:0,nss:1,gi08:false});      // legacy-ish: 20 MHz, most robust
+  return chain;
+}
+// Airtime-based delivery through the retry chain: a failed primary is redelivered at a
+// fallback rate, so throughput dips to ~the fallback rate (not zero). Returns Mbps + airtime.
+function retryTput(p,base,snr,col,frameBits){
+  const chain=retryChain(p,base); let reach=1, eT=0, deliv=0, firstFail=0;
+  for(let k=0;k<chain.length;k++){ const r=chain[k];
+    const per=perLookup(r.bw,r.mcs,r.nss,r.gi08,snr), fail=1-(1-per)*(1-col);
+    const phy=peakTpt(r.mcs,r.nss,r.bw,r.gi08), tR=phy>0?frameBits/(phy*1e6):1e6;
+    eT+=reach*tR; deliv+=reach*(1-fail);
+    if(k===0) firstFail=fail;
+    reach*=fail; if(reach<1e-4) break;
+  }
+  const tput=eT>0?(deliv*frameBits)/eT/1e6:0;
+  return {tput, eT, firstFail};
 }
 
 function decide(){
@@ -529,6 +588,9 @@ function onBandChange(){
   if(+sel.value>maxBw) sel.value=String(maxBw);
   upd(); const sc=document.getElementById('tab-scenario'); if(sc && sc.style.display!=='none') runScenario();
 }
+function onProfileChange(){
+  upd(); const sc=document.getElementById('tab-scenario'); if(sc && sc.style.display!=='none') runScenario();
+}
 
 // --- Auto-demo: sweep channel SNR up and down so you can watch the "gears" shift ---
 let demoTimer=null, demoDir=1;
@@ -548,13 +610,13 @@ function toggleDemo(){
 // ============ Scenario-over-time tab (closed-loop sim, ports tlcsim harness + ReferenceTLC) ============
 const BANDWIDTHS=[20,40,80,160,320];
 let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[];   // shared zoom window (ms) + search-cycle log
-const SCN_PAD={scnMcs:[34,48],scnTpt:[48,14],scnBw:[40,48],scnNss:[48,48]};
+const SCN_PAD={scnMcs:[34,48],scnTpt:[48,14],scnBw:[40,48],scnNss:[48,48],scnGi:[48,48]};
 const scnVis=r=>r.t+r.dt>=ZT0 && r.t<=ZT1;
 function scnXAxis(ctx,xTo,H,yoff){ ctx.fillStyle='#475569'; ctx.textAlign='center'; const t0=ZT0/1000,t1=ZT1/1000,sp=(t1-t0)||1,stp=Math.max(sp/6,0.0005),dec=sp<3?2:sp<12?1:0; for(let s=t0;s<=t1+1e-6;s+=stp){ ctx.fillText(s.toFixed(dec),xTo(s*1000),H-yoff); } }
 function timeAtX(cv,clientX){ const p=SCN_PAD[cv.id],r=cv.getBoundingClientRect(),xC=(clientX-r.left)*(cv.width/r.width),plotW=cv.width-p[0]-p[1],f=Math.max(0,Math.min(1,(xC-p[0])/plotW)); return ZT0+f*(ZT1-ZT0); }
-const SCN_DRAW={scnMcs:drawScnMcs,scnTpt:drawScnTpt,scnBw:drawScnBw,scnNss:drawScnNss};
+const SCN_DRAW={scnMcs:drawScnMcs,scnTpt:drawScnTpt,scnBw:drawScnBw,scnNss:drawScnNss,scnGi:drawScnGi};
 function wireScnZoom(){
-  ['scnMcs','scnTpt','scnBw','scnNss'].forEach(id=>{ const cv=document.getElementById(id); if(!cv||cv._zoomWired) return; cv._zoomWired=true; cv.style.cursor='crosshair'; let sx=null;
+  ['scnMcs','scnTpt','scnBw','scnNss','scnGi'].forEach(id=>{ const cv=document.getElementById(id); if(!cv||cv._zoomWired) return; cv._zoomWired=true; cv.style.cursor='crosshair'; let sx=null;
     cv.addEventListener('mousedown',e=>{ sx=e.clientX; });
     cv.addEventListener('mousemove',e=>{ if(sx===null)return; SCN_DRAW[id](SCN_RECS,SCN_TOTAL); const ctx=cv.getContext('2d'),r=cv.getBoundingClientRect(),k=cv.width/r.width,x0=(Math.min(sx,e.clientX)-r.left)*k,x1=(Math.max(sx,e.clientX)-r.left)*k; ctx.fillStyle='rgba(0,113,197,0.15)'; ctx.fillRect(x0,0,x1-x0,cv.height); });
     cv.addEventListener('mouseup',e=>{ if(sx===null)return; const a=timeAtX(cv,Math.min(sx,e.clientX)),b=timeAtX(cv,Math.max(sx,e.clientX)); sx=null; if(b-a>SCN_TOTAL*0.005){ ZT0=Math.max(0,a); ZT1=Math.min(SCN_TOTAL,b); } drawScenario(SCN_RECS,SCN_TOTAL); });
@@ -587,6 +649,7 @@ const SCN_PRESETS={
   'fade & recover':'1700, 40\n1700, 40, 6\n1600, 6, 40',
   'sudden drop':'1700, 40\n1700, 8\n1600, 40',
   'interference burst':'1700, 35, -, 0.02\n1700, 35, -, 0.40\n1600, 35, -, 0.02',
+  'sudden wall (LOS → long → LOS)':'1700, 40, -, 0, small room\n1700, 40, -, 0, outdoor\n1600, 40, -, 0, small room',
   'long fade':'1000, 45\n3000, 45, 2\n1000, 2, 45',
 };
 (function(){ const box=document.getElementById('scnPresets'); if(box) for(const k in SCN_PRESETS){ const b=document.createElement('button'); b.textContent=k; b.onclick=()=>{ document.getElementById('segs').value=SCN_PRESETS[k]; runScenario(); }; box.appendChild(b); } })();
@@ -597,25 +660,30 @@ function parseSegs(txt){ const segs=[];
     if(p.length<2) throw new Error('need "ms, SNR": '+s);
     const se=(p.length>2 && p[2]!=='' && p[2]!=='-')?+p[2]:null;
     const col=(p.length>3 && p[3]!=='' && p[3]!=='-')?+p[3]:0;
-    segs.push({ms:+p[0],snr:+p[1],se,col}); }
+    let tau=null;   // per-segment delay spread; null -> use the Live tab profile selector
+    if(p.length>4 && p[4]!=='' && p[4]!=='-'){ const k=p[4].toLowerCase(); tau=(k in PROFILE_TAU)?PROFILE_TAU[k]:(isNaN(+p[4])?null:+p[4]); }
+    segs.push({ms:+p[0],snr:+p[1],se,col,tau}); }
   return segs; }
 function chanAt(segs,t){ let acc=0;
-  for(const s of segs){ if(t<acc+s.ms){ const f=s.ms?(t-acc)/s.ms:0; return {snr:s.se==null?s.snr:s.snr+(s.se-s.snr)*f, col:s.col}; } acc+=s.ms; }
-  const s=segs[segs.length-1]; return {snr:s.se==null?s.snr:s.se, col:s.col}; }
+  for(const s of segs){ if(t<acc+s.ms){ const f=s.ms?(t-acc)/s.ms:0; return {snr:s.se==null?s.snr:s.snr+(s.se-s.snr)*f, col:s.col, tau:s.tau}; } acc+=s.ms; }
+  const s=segs[segs.length-1]; return {snr:s.se==null?s.snr:s.se, col:s.col, tau:s.tau}; }
 
 function makeTLC(maxBw,maxNss,MAXM,seed){
   const bws=BANDWIDTHS.filter(b=>b<=maxBw), nssOpts=maxNss>=2?[1,2]:[1];
   const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300,UPGUARD:40,IGNORE:400,STALE:300};
-  let col=[1,bws[0],true], mcs=0, sr={}, srT={}, state='STAY', mode='search', succ=0, fail=0, lastEnd=-1e9, lastReason=null, pending=null, sq=[], best=null, target=0, stayPeak=0, scEvents=[], curSc=null, nextUp=0, avoidMcs=-1, avoidUntil=-1e9;
+  let col=[1,bws[0],true], mcs=0, sr={}, srT={}, state='STAY', mode='search', succ=0, fail=0, lastEnd=-1e9, lastReason=null, pending=null, sq=[], best=null, target=0, stayPeak=0, scEvents=[], curSc=null, nextUp=0, avoidMcs=-1, avoidUntil=-1e9, stableCol=[1,bws[0],true], stableMcs=0;
   if(seed){ col=seed.col.slice(); mcs=seed.mcs; }   // warm start: RSSI/SNR-seeded initial rate (FW _rsMngSetInitRate)
   const key=(c,m)=>c[0]+','+c[1]+','+(c[2]?1:0)+','+m;
   const avgtpt=(c,m,s)=>s*peakTpt(m,c[0],c[1],c[2]);
   // FW _rsMngGetBestRate: lowest MCS in this column whose expected tpt beats the target
   function bestRateForCol(c,tgt){ for(let m=0;m<=MAXM;m++){ if(peakTpt(m,c[0],c[1],c[2])>=tgt) return m; } return MAXM; }
   function neigh(){ const n=col[0],b=col[1],g=col[2],out=[]; for(const nn of nssOpts) if(nn!==n) out.push([nn,b,g]); const i=bws.indexOf(b); if(i+1<bws.length) out.push([n,bws[i+1],g]); if(i-1>=0) out.push([n,bws[i-1],g]); out.push([n,b,!g]); return out; }
-  function lq(){ return {primary:{mcs,nss:col[0],bw:col[1],gi08:col[2]}, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
+  function lq(){ const primary={mcs,nss:col[0],bw:col[1],gi08:col[2]};
+    const stable=(state==='SEARCH')?{mcs:stableMcs,nss:stableCol[0],bw:stableCol[1],gi08:stableCol[2]}:primary;   // FW: search fallbacks come from the stable column
+    return {primary, stable, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
   // target = raw peak tpt of the stable column this dwell (matches bestRateForCol's raw compare)
-  function enter(s,t){ const inc=avgtpt(col,mcs,s); target=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2])); best=[col.slice(),mcs,inc];
+  function enter(s,t){ stableCol=col.slice(); stableMcs=mcs;   // remember the stable column before probing (FW: retry falls back to it)
+    const inc=avgtpt(col,mcs,s); target=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2])); best=[col.slice(),mcs,inc];
     curSc={n:scEvents.length+1, t, reason:pending, from:[col.slice(),mcs], probes:[], to:null, switched:false}; scEvents.push(curSc);
     sq=neigh(); succ=fail=0; state='SEARCH'; mode='search'; col=sq.shift(); mcs=bestRateForCol(col,target); }
   return { lq, scLog:()=>scEvents, onStats(txed,acked,t){
@@ -653,21 +721,25 @@ function runScenario(){
   const maxBw=+bw_.value, maxNss=+ant_.value, frame=1500, MAXM=13;
   const bws=BANDWIDTHS.filter(b=>b<=maxBw), cands=[];
   for(const b of bws) for(let nn=maxNss;nn>=1;nn--) for(let m=0;m<=MAXM;m++) for(const g of [true,false]) cands.push([b,nn,m,g]);
-  const bc={}; const bestCand=(snr)=>{ const r=Math.round(snr*2)/2; if(bc[r]===undefined){ let bt=-1,win=null; for(const c of cands){ const e=peakTpt(c[2],c[1],c[0],c[3])*(1-perLookup(c[0],c[2],c[1],c[3],r)); if(e>bt){bt=e;win={tpt:e,mcs:c[2],bw:c[0],nss:c[1],gi:c[3]};} } bc[r]=win; } return bc[r]; };
+  const bc={}; const bestCand=(snr)=>{ const r=Math.round(snr*2)/2+'@'+curTau(); if(bc[r]===undefined){ let bt=-1,win=null; for(const c of cands){ const e=peakTpt(c[2],c[1],c[0],c[3])*(1-perLookup(c[0],c[2],c[1],c[3],snr)); if(e>bt){bt=e;win={tpt:e,mcs:c[2],bw:c[0],nss:c[1],gi:c[3]};} } bc[r]=win; } return bc[r]; };
   const warm=(document.getElementById('warm')||{checked:true}).checked;
+  TAU_OVERRIDE=chanAt(segs,0).tau;               // seed uses the starting segment's delay spread
   const bcd0=bestCand(chanAt(segs,0).snr);   // FW-style: seed the initial rate from the starting SNR
   const seed=warm?{col:[bcd0.nss,bcd0.bw,bcd0.gi],mcs:Math.max(0,Math.min(3,bcd0.mcs))}:null;
   const tlc=makeTLC(maxBw,maxNss,MAXM,seed); let lq=tlc.lq(), t=0; const recs=[]; let g=0;
   while(t<total && g++<60000){
     const ch=chanAt(segs,t), N=lq.thold, p=lq.primary;
-    const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swin=(1-per)*(1-ch.col), acked=Math.round(N*swin);
-    const phy=peakTpt(p.mcs,p.nss,p.bw,p.gi08), dt=phy>0?N*frame*8/(phy*1e6)*1000:1;
+    TAU_OVERRIDE=ch.tau;                          // per-segment delay spread drives perLookup + bestCand
+    const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swin=(1-per)*(1-ch.col), acked=Math.round(N*swin);   // primary-rate SR drives the TLC decision (unchanged)
+    const rt=retryTput(p,lq.stable,ch.snr,ch.col,frame*8);  // retry: fallbacks from the stable column (FW-faithful)
+    const dt=N*rt.eT*1000;                          // window airtime incl. retries
     const bcd=bestCand(ch.snr);
-    recs.push({t,dt,mcs:p.mcs,nss:p.nss,bw:p.bw,gi:p.gi08,snr:ch.snr,col:ch.col,sr:swin,tpt:phy*swin,best:bcd.tpt*(1-ch.col),bestMcs:bcd.mcs,bestBw:bcd.bw,bestNss:bcd.nss,mode:lq.mode,state:lq.state});
+    recs.push({t,dt,mcs:p.mcs,nss:p.nss,bw:p.bw,gi:p.gi08,snr:ch.snr,col:ch.col,tau:ch.tau,sr:swin,tpt:rt.tput,rty:rt.firstFail,best:bcd.tpt*(1-ch.col),bestMcs:bcd.mcs,bestBw:bcd.bw,bestNss:bcd.nss,bestGi:bcd.gi,mode:lq.mode,state:lq.state});
     lq=tlc.onStats(N,acked,t); t+=Math.max(dt,0.02);
   }
-  // rolling average achieved throughput over the last 500 ms
-  { let lo=0,sumT=0,sumD=0; for(let i=0;i<recs.length;i++){ sumT+=recs[i].tpt*recs[i].dt; sumD+=recs[i].dt; while(recs[lo].t<recs[i].t-500){ sumT-=recs[lo].tpt*recs[lo].dt; sumD-=recs[lo].dt; lo++; } recs[i].avg500=sumD>0?sumT/sumD:recs[i].tpt; } }
+  TAU_OVERRIDE=null;                             // don't leak the override into the Live tab
+  // rolling average achieved throughput over the last 100 ms
+  { let lo=0,sumT=0,sumD=0; for(let i=0;i<recs.length;i++){ sumT+=recs[i].tpt*recs[i].dt; sumD+=recs[i].dt; while(recs[lo].t<recs[i].t-100){ sumT-=recs[lo].tpt*recs[lo].dt; sumD-=recs[lo].dt; lo++; } recs[i].avg100=sumD>0?sumT/sumD:recs[i].tpt; } }
   SCN_RECS=recs; SCN_TOTAL=total; SCN_SC=tlc.scLog(); ZT0=0; ZT1=total; wireScnZoom();
   drawScenario(recs,total);
 }
@@ -696,7 +768,7 @@ function drawScenario(recs,total){
     'time between SC: '+scGap.toFixed(1)+' ms\n'+
     'SC duration   : '+scDur.toFixed(1)+' ms\n'+
     'time in dwell : '+(dwell*100).toFixed(0)+' %';
-  drawScnTpt(recs,total); drawScnMcs(recs,total); drawScnBw(recs,total); drawScnNss(recs,total);
+  drawScnTpt(recs,total); drawScnMcs(recs,total); drawScnBw(recs,total); drawScnNss(recs,total); drawScnGi(recs,total);
   renderScLog(SCN_SC);
 }
 function drawScnMcs(recs,total){
@@ -738,11 +810,15 @@ function drawScnTpt(recs,total){
   scnBands(ctx,recs,xTo,padT,plotH);
   ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(let k=0;k<=4;k++){ const v=M*k/4,y=yT(v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(Math.round(v),padL-5,y+3); }
   ctx.strokeStyle='#7C3AED'; ctx.lineWidth=1.5; ctx.beginPath(); let bf=false; for(const r of recs){ if(!scnVis(r))continue; const x=xTo(r.t),y=yT(r.best); bf?ctx.lineTo(x,y):ctx.moveTo(x,y); bf=true; } ctx.stroke();
-  ctx.strokeStyle='#2E8B57'; ctx.lineWidth=2; ctx.beginPath(); let af=false;
-  for(let i=0;i<recs.length;i++){ const r=recs[i]; if(!scnVis(r))continue; const x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yT(r.tpt); if(!af){ctx.moveTo(x0,y);af=true;} else ctx.lineTo(x0,y); ctx.lineTo(x1,y); }
-  ctx.stroke();
-  ctx.strokeStyle='#0E7C86'; ctx.lineWidth=1.8; ctx.setLineDash([5,3]); ctx.beginPath(); let vf=false; for(const r of recs){ if(!scnVis(r))continue; const x=xTo(r.t),y=yT(r.avg500); vf?ctx.lineTo(x,y):ctx.moveTo(x,y); vf=true; } ctx.stroke(); ctx.setLineDash([]);
-  ctx.textAlign='left'; ctx.font='9px Segoe UI'; ctx.fillStyle='#2E8B57'; ctx.fillText('\u25a0 achieved',padL+4,padT-3); ctx.fillStyle='#7C3AED'; ctx.fillText('\u2014 best',padL+72,padT-3); ctx.fillStyle='#0E7C86'; ctx.fillText('- - avg 500ms',padL+108,padT-3); ctx.font='10px Segoe UI';
+  ctx.lineWidth=2;
+  for(let i=0;i<recs.length;i++){ const r=recs[i]; if(!scnVis(r))continue; const x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yT(r.tpt);
+    ctx.strokeStyle=(r.rty>=0.15)?'#c0392b':'#2E8B57';   // red where the retry table is backfilling failed primaries
+    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y);
+    const r2=(i+1<recs.length)?recs[i+1]:null; if(r2&&scnVis(r2)) ctx.lineTo(x1,yT(r2.tpt));
+    ctx.stroke();
+  }
+  ctx.strokeStyle='#0E7C86'; ctx.lineWidth=1.8; ctx.setLineDash([5,3]); ctx.beginPath(); let vf=false; for(const r of recs){ if(!scnVis(r))continue; const x=xTo(r.t),y=yT(r.avg100); vf?ctx.lineTo(x,y):ctx.moveTo(x,y); vf=true; } ctx.stroke(); ctx.setLineDash([]);
+  ctx.textAlign='left'; ctx.font='9px Segoe UI'; ctx.fillStyle='#2E8B57'; ctx.fillText('\u25a0 achieved',padL+4,padT-3); ctx.fillStyle='#c0392b'; ctx.fillText('\u25a0 retry',padL+70,padT-3); ctx.fillStyle='#7C3AED'; ctx.fillText('\u2014 best',padL+112,padT-3); ctx.fillStyle='#0E7C86'; ctx.fillText('- - avg 100ms',padL+150,padT-3); ctx.font='10px Segoe UI';
   scnXAxis(ctx,xTo,H,12);
   ctx.save(); ctx.translate(12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#475569'; ctx.fillText('Mbps',0,0); ctx.restore();
 }
@@ -801,6 +877,27 @@ function drawScnNss(recs,total){
   ctx.textAlign='left'; ctx.font='9px Segoe UI'; ctx.fillStyle='#0071C5'; ctx.fillText('\u2014 PR',padL+2,padT-4); ctx.fillStyle='#E8820C'; ctx.fillText('\u2014 search',padL+38,padT-4); ctx.fillStyle='#7C3AED'; ctx.fillText('- - genie',padL+92,padT-4); ctx.font='10px Segoe UI';
   scnXAxis(ctx,xTo,H,10);
   ctx.save(); ctx.translate(11,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#0071C5'; ctx.fillText('Streams',0,0); ctx.restore();
+}
+function drawScnGi(recs,total){
+  const c=document.getElementById('scnGi'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
+  const padL=48,padR=48,padT=14,padB=22,plotW=W-padL-padR,plotH=H-padT-padB, yG=gi08=>padT+plotH-((gi08?1:0))*plotH;   // 0.8us on top, 3.2us bottom
+  const xTo=t=>{const x=padL+(t-ZT0)/(ZT1-ZT0)*plotW; return x<padL?padL:(x>W-padR?W-padR:x);};
+  scnBands(ctx,recs,xTo,padT,plotH);
+  ctx.fillStyle='#94a3b8'; ctx.textAlign='right'; for(const gi of [true,false]){ const y=yG(gi); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(gi?'0.8\u00b5s':'3.2\u00b5s',padL-5,y+3); }
+  scnSnrOverlay(ctx,recs,xTo,padL,padR,padT,plotH,W);
+  ctx.lineWidth=2;
+  for(let i=0;i<recs.length;i++){ const r=recs[i]; if(!scnVis(r))continue; const x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yG(r.gi);
+    ctx.strokeStyle=r.state==='SEARCH'?'#E8820C':'#0071C5';
+    ctx.beginPath(); ctx.moveTo(x0,y);
+    if(i+1<recs.length && recs[i+1].state===r.state){ ctx.lineTo(x1,y); ctx.lineTo(x1,yG(recs[i+1].gi)); } else ctx.lineTo(x1,y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle='#7C3AED'; ctx.lineWidth=2; ctx.setLineDash([5,3]); ctx.beginPath(); let gf=false;
+  for(let i=0;i<recs.length;i++){ const r=recs[i]; if(!scnVis(r))continue; const x0=xTo(r.t),x1=xTo(r.t+r.dt),y=yG(r.bestGi); if(!gf){ctx.moveTo(x0,y);gf=true;} else ctx.lineTo(x0,y); ctx.lineTo(x1,y); }
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.textAlign='left'; ctx.font='9px Segoe UI'; ctx.fillStyle='#0071C5'; ctx.fillText('\u2014 PR',padL+2,padT-4); ctx.fillStyle='#E8820C'; ctx.fillText('\u2014 search',padL+38,padT-4); ctx.fillStyle='#7C3AED'; ctx.fillText('- - genie',padL+92,padT-4); ctx.font='10px Segoe UI';
+  scnXAxis(ctx,xTo,H,10);
+  ctx.save(); ctx.translate(11,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#0071C5'; ctx.fillText('Guard interval',0,0); ctx.restore();
 }
 function buildScList(recs){
   const spans=scnSpans(recs,'SEARCH'), list=[];

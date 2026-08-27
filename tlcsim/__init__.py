@@ -14,7 +14,7 @@ Quick start:
     res.summary(); res.to_csv("run.csv")
 """
 from .rates import Rate, expected_tpt, sens_snr, all_rates
-from .channel import Channel, Seg, ChannelState
+from .channel import Channel, Seg, ChannelState, PROFILES
 from .per_model import per, phy_per, has_rate, lut_keys
 from .emulator import simulate_window, WindowStats
 from .tlc import TLC, ReferenceTLC, TLCConfig, LinkQuality
@@ -22,7 +22,7 @@ from .results import RunResult, Record
 from .harness import run_sim
 from . import scenarios
 
-__all__ = ["run_sim", "scenarios", "Channel", "Seg", "ChannelState", "Rate",
+__all__ = ["run_sim", "scenarios", "Channel", "Seg", "ChannelState", "PROFILES", "Rate",
            "ReferenceTLC", "TLC", "TLCConfig", "LinkQuality", "per", "phy_per",
            "has_rate", "lut_keys", "expected_tpt", "sens_snr", "all_rates",
            "simulate_window", "WindowStats", "RunResult", "Record"]

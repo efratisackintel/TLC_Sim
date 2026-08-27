@@ -7,7 +7,7 @@ and thresholds. It is the SWAP POINT — to test the real firmware TLC, implemen
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 from .rates import Rate, expected_tpt, MAX_MCS, BANDWIDTHS
 from .emulator import WindowStats
 
@@ -17,6 +17,7 @@ class LinkQuality:
     """B4 output: retry table + how many frames until the next statistics report."""
     rate_table: List[Rate]
     stat_threshold: int   # frames until next report -> small = search, large = dwell
+    stable: Optional[Rate] = None   # FW: retry fallbacks are built from the stable column
 
     @property
     def primary(self) -> Rate:
@@ -76,6 +77,8 @@ class ReferenceTLC(TLC):
         self.pending_reason = None             # reason of the cycle currently running
         self.search_q: List = []               # remaining candidate columns this cycle
         self.best = None                       # (col, mcs, avg_tpt) best seen this cycle
+        self.stable_col = self.col             # stable column the search reverts/falls back to
+        self.stable_mcs = self.mcs
         return self._lq()
 
     # --- helpers ---
@@ -111,9 +114,16 @@ class ReferenceTLC(TLC):
 
     def _lq(self) -> LinkQuality:
         thold = self.THOLD_DWELL if self.mode == "dwell" else self.THOLD_SEARCH
-        return LinkQuality(self._retry_table(), thold)
+        if self.state == "SEARCH":
+            n, b, g = self.stable_col
+            stable = Rate(self.stable_mcs, n, b, g)
+        else:
+            stable = self._rate()
+        return LinkQuality(self._retry_table(), thold, stable)
 
     def _enter_search(self, sr) -> None:
+        self.stable_col = self.col              # remember the stable column before probing (FW fallback base)
+        self.stable_mcs = self.mcs
         self.best = (self.col, self.mcs, self._avgtpt(self.col, self.mcs, sr))
         self.search_q = self._neighbours()
         self.succ = self.fail = 0

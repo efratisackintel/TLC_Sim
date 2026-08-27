@@ -104,6 +104,20 @@ The real algorithm is **`RS_MNG` (Rate-Scale Manager, a.k.a. TLC)**, per-station
 - **Power cap** (`USNIFFER_EVT_RS_MNG_POWER_CAP_S`): MIMO/SISO `maxPower`/`powerCap`, `forceSiso` — the real analogue of the playground's PSD penalty (driven by SAR/TAS/regulatory, not a formula).
 - Note: the RS_MNG *decision source* is not in the `wcd_fw-dev` view here — only its telemetry/config structs and `tlcContext::LQCmdParams` are.
 
+### 3.5 Retry table (LQ command) — FW facts + how the sim models it
+
+**FW source of truth:** `_rsMngBuildRatesTbl()` / `_rsMngFillLQCmd()` in `fw/src/umac/main/dataPath/rateScaleMng/rateScaleMng.c` (~L2456 / L2709). The retry table = `LINK_QUALITY_CMD_API_S.rate_scale_table` (the "retry ladder"), pre-loaded into HW; the HW walks it **per-attempt** without re-invoking the rate algorithm.
+
+- **The retry table is active in ALL states — dwell, search cycle, AND upscale probe.** The claim "retry table only active in dwell, not SC" is **FALSE** per the source. What is SC-specific is the **test window** (`LINK_QUAL_FLAGS_TEST_WINDOWS_MSK` + `uAggFrameCntInTestWin = RS_MNG_UPSCALE_AGG_FRAME_COUNT`), which only limits how many frames are *counted at the test rate* for the decision — delivery still falls back.
+- **Entry 0 = the sent rate** (the *test* rate during a probe).
+- **Search cycle** (`searchBetterTbl`): entry 0 = the test/search column rate; the **rest of the ladder is built from the STABLE column** (pre-search committed rate), per the FW comment *"only the initial rate should be of that column. The rest of the table is constructed from the 'stable' column."*
+- **Upscale probe** (`tryingRateUpscale`): entry 0 = the higher MCS (**tried once**); the rest = the **previous known-good** (lower) MCS.
+- **Dwell:** full descending ladder from the committed rate (INITIAL/SECONDARY/third rate counts, then GI↑/STBC/SISO/BW↓, then legacy).
+- **Per-rate stats (not pooled):** SR for the decision is `acked/txed` **per rate**. A too-high probe's primary rate reads ~0% (so it's abandoned) while the fallback delivers → the 20×100-MPDU "is it 50%?" example: same-rate retry (collision) → 50%; drop-to-lower-rate (bad-rate) → primary 0% + fallback 100%, never a blended 50%.
+- **Why the depth matters:** a failed primary is redelivered at the fallback rate within the same/next TXOP (BA is SIFS-fast for A-MPDU), so real throughput dips to **~the fallback rate, not zero**. RTS is the only *preventive* collision tool the FW uses today.
+
+**Sim modeling (both engines, 2026-08-25):** `retry_tput()`/`retry_chain()` (`per_model.py`) and `retryTput()`/`retryChain()` (playground) build the chain FW-style — entry 0 = sent rate, fallbacks from the **stable column** during SC (`lq.stable` / `LinkQuality.stable`), from the primary for dwell/upscale. Throughput is **airtime-weighted** (delivered bits ÷ (failed-attempt + retry airtime)); the **rate decision still uses the primary-rate SR** so too-high rates are still abandoned. Playground shows the achieved line in **red** while the retry table is backfilling. Approximation: per-rung mean, no per-MPDU BA bitmap / SIFS-BA overhead.
+
 ---
 
 ## 4. The simulation package `tlcsim/` (6 blocks, one file per block)
@@ -164,13 +178,15 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 
 `parse_segments(text)` parses the preset textbox.
 
+> Engine parity: the GUI runs the **same `tlcsim` engine** via `run_sim`, so it **inherits** the retry-table (`retry_tput`) and delay-spread ISI automatically in its results. But it has **no UI for the new features** — `Seg(...)` is built without a profile, so the channel is always **AWGN (τ=0)**, and there is **no GI plot / no retry-red colouring** (those are playground-only). To exercise delay-spread/profiles in Python, use `run_example.py` / a script with `Seg(profile=...)`.
+
 ---
 
 ## 7. Docs & deliverables (under `doc/`)
 
 | File | What |
 |---|---|
-| `tlc_playground.html` | **Primary interactive artefact.** Three tabs (tab bar `.ptabbar` / `showTab()`, deep-linkable via `#live`/`#scenario`/`#doc`): **🎛 Live decision** (SNR slider → chosen MCS/streams/BW/GI, all-MCS PER-vs-SNR chart, PSD-penalty toggle, Mbps axis; **Max BW defaults to 320 MHz, Antennas to 2/MIMO**), **📈 Simulation** (closed-loop scenario over time: 4 charts — throughput, MCS+SNR, BW+SNR, streams+SNR — SEARCH bands numbered, search-cycle log with chosen PR, KPIs incl. **time between SC** and **SC duration**), **🏗 Architecture** (embeds the architecture doc via a right-sized full-width `<iframe>`; footer hidden on this tab). |
+| `tlc_playground.html` | **Primary interactive artefact.** **Four** tabs (tab bar `.ptabbar` / `showTab()`, deep-linkable via `#live`/`#scenario`/`#doc`/`#improve`): **🎛 Live decision** (SNR slider → chosen MCS/streams/BW/GI, all-MCS PER-vs-SNR chart; controls: **Band** (2.4/5/6), **Channel profile / delay spread** (awgn/small room/office/outdoor → τ), Max BW (**def 320**), Antennas (**def 2/MIMO**), PSD-penalty toggle), **📈 Simulation** (closed-loop scenario over time: **5 charts** — 0 throughput (achieved/best/**avg 100 ms**; achieved turns **red** while the retry table backfills), 1 MCS+SNR, 2 BW+SNR, 3 streams+SNR, 4 **GI+SNR** — SEARCH bands numbered, search-cycle log, KPIs incl. **time between SC** / **SC duration**; **drag to zoom all charts**; preset format `ms, SNR[, SNR_end[, collision[, profile]]]` with per-segment channel profile; presets incl. **sudden wall (LOS → long → LOS)**), **🏗 Architecture** and **💡 Improvements** (both lazy-loaded iframes; footer hidden on these tabs). |
 | `tlc_sim_architecture_old.html` | The interactive architecture page (**renamed from `tlc_sim_architecture.html`**; now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6, 7 Decisions, 8 TLC flow, 9 TX power) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). **B3 now carries a "What counts in the Success Ratio" panel** (SR decomposition: channel PER vs collision, stacked-bar SVG + table). |
 | `tlc_sim_improvements.html` | **NEW (2026-08-24)** — the **💡 Improvements** tab (4th playground tab, `#improve`; loaded as an iframe like Architecture). Left `#poc`-style **Ideas** nav (`ideaGo()`). **Idea 1 — Handle collision**: problem (blended SR), proposed algorithm (split channel vs collision, don't down-scale for contention, protect with RTS/CTS), how-to-distinguish table, expected-impact table, and a **Test — collision scenario** section (setup preset, A/B pass-fail criteria, control checks, Python CI hook). |
 | `per_model_explorer.html` | Standalone PER explorer — every measured PER curve per permutation, log-axis toggle, SNR marker, CSV export. |
@@ -206,6 +222,7 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - `summary()` Unicode crash under redirect → ASCII-safe.
 - Confirmed (twice, from source) TLC has **no periodic search timer** and is **SR-driven, not SNR**.
 - **Data-driven PER rework** (this session's baseline): removed the analytic sigmoid entirely; B2 now interpolates measured EHT curves. SISO→`1x2` antenna, MIMO→`2x2` antenna mapping. `run_example.py` efficiency ~0.81.
+- **Retry table now modeled (2026-08-25)** in BOTH engines: a failed primary is redelivered through a fallback chain via **airtime-weighted** throughput (`retry_tput` in `per_model.py`; `retryTput` in the playground). Built like the FW `_rsMngBuildRatesTbl`: **entry 0 = the sent/test rate**, and the fallback ladder is taken from the **stable column** — during a **search cycle the retry table is still active** (verified against `rateScaleMng.c:2456`), its fallbacks = the **pre-search committed rate** (not the test column); dwell/upscale base = primary. The **rate decision still uses the primary-rate SR** (unchanged), so a too-high rate is still abandoned — only the **throughput dip depth** is corrected (dips to ~fallback rate, not zero). Playground: achieved line turns **red** while retrying; avg line = **100 ms**. Approximation: per-rung mean, no per-MPDU BA bitmap / SIFS-BA overhead. NOTE: the claim "retry table only active in dwell, not SC" is **false** per the FW source.
 - **Playground merge (2026-08-23)**: architecture doc merged into the playground as the **🏗 Architecture** iframe tab; renamed the standalone to `_old`; added left POC nav; removed the middle B1–B6 tab row; Simulation tab KPIs gained **time between SC** / **SC duration**; **default Max BW = 320 MHz**.
 - **Double-scrollbar / narrow-iframe fixes**: doc panel must NOT reuse the `.wrap` class (it's a CSS grid → forced the iframe into a 360 px column); iframe height computed from its live top; footer hidden on the doc tab.
 
@@ -221,7 +238,7 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - Add an explicit "no periodic timer — count-driven; 300 ms only rate-limits success searches" note on the HTML condition graphic.
 - Clean up the dead unused `B4FLOW` const still present in the HTML (harmless).
 - **Improvement Idea 1 — Handle collision** (documented in `tlc_sim_improvements.html`): split channel vs collision loss; don't down-scale for contention; protect with RTS. Prototype as an **opt-in "collision-aware TLC" toggle** in the Simulation tab (default OFF = FW-faithful) so the Improvements idea becomes a live A/B. Note: sim RTS is currently **cosmetic** (a flag) — to show Idea 1's benefit, RTS must actually lower the modeled collision rate.
-- **Improvement Idea 2 — GI / channel-profile awareness** (see 11.4): add channel-length/delay-spread (LOS/office/outdoor) via a GI-vs-τ ISI floor layered on the AWGN curves; makes GI selection meaningful.
+- **Improvement Idea 2 — GI / channel-profile awareness** (see 11.4): **IMPLEMENTED (2026-08-24)** in BOTH engines. B1 carries `delay_spread_us` + named `PROFILES = {"awgn":0.0,"small room":0.5,"office":1.0,"outdoor":3.0}`; B2 adds a synthetic ISI penalty (`isi_penalty()`: SNR penalty `6dB×(τ/GI−1)` + PER floor `0.5·(1−e^−excess)`, tunable via `ISI_SNR_PENALTY_DB/ISI_FLOOR_MAX/ISI_FLOOR_SCALE`). Playground mirror added: a **Channel profile** selector on the Live tab + `isiPenalty()` in `perLookup()`. GI binary (0.8/3.2µs, no 1.6) → **outdoor forces GI 3.2**; **office keeps GI 0.8** at high SNR (its 11% floor beats the ~15% long-GI overhead); small room/awgn unaffected. τ=0 default = backward-compatible.
 - **Fix the B3 doc caveat** (11.2): reword "real firmware separates the two…" → make clear FW counts collision/ACK losses together today; the distinguishing table is Idea 1 (proposed), not current behavior.
 
 ---

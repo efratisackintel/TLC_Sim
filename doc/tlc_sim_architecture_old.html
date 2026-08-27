@@ -139,7 +139,7 @@
       <rect x="40" y="384" width="192" height="96" rx="12" fill="#EAF3FB" stroke="#0071C5" stroke-width="2"/>
       <circle cx="60" cy="404" r="13" fill="#0071C5"/><text x="60" y="408" text-anchor="middle" font-size="12" font-weight="800" fill="#fff">B1</text>
       <text x="136" y="416" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Channel Configuration</text>
-      <text x="136" y="436" text-anchor="middle" font-size="11.5" fill="#475569">SNR (dB), collision</text>
+      <text x="136" y="436" text-anchor="middle" font-size="11.5" fill="#475569">SNR (dB), collision, τ</text>
       <text x="136" y="453" text-anchor="middle" font-size="11.5" fill="#475569">vs. time (ground truth)</text>
       <text x="136" y="472" text-anchor="middle" font-size="10" fill="#94a3b8" font-family="Consolas">B1 · channel.py</text>
 
@@ -161,7 +161,7 @@
       <line x1="820" y1="60" x2="820" y2="149" stroke="#0071C5" stroke-width="2" marker-end="url(#aBlue)"/>
       <text x="828" y="110" font-size="10" fill="#0071C5" font-weight="700">config</text>
       <line x1="232" y1="426" x2="299" y2="426" stroke="#0071C5" stroke-width="2.2" marker-end="url(#aBlue)"/>
-      <text x="266" y="418" text-anchor="middle" font-size="9.2" fill="#0071C5" font-weight="700">channel</text>
+      <text x="266" y="418" text-anchor="middle" font-size="9.2" fill="#0071C5" font-weight="700">SNR, coll, τ</text>
       <line x1="382" y1="268" x2="382" y2="383" stroke="#E8820C" stroke-width="2.2" marker-end="url(#aOrange)"/>
       <text x="374" y="322" text-anchor="end" font-size="9.2" fill="#E8820C" font-weight="700">rate</text>
       <line x1="418" y1="383" x2="418" y2="269" stroke="#E8820C" stroke-width="2.2" marker-end="url(#aOrange)"/>
@@ -196,8 +196,11 @@
       <tr><td><b>Intel PER model = TLC PER model</b></td><td>Uses Intel's measured EHT PER‑vs‑SNR curves as the TLC's link model, <b>assuming the AP's PER behaviour is similar</b> (roughly symmetric link). A real peer/AP may have different curves.</td></tr>
       <tr><td><b>SISO scored with the 1×2 PER model</b></td><td>Single‑stream (SISO) TX is evaluated with the <b>1×2</b> curve, <b>assuming the AP uses MRC receive combining with at least 2 antennas</b> (2‑antenna RX diversity). MIMO uses the <b>2×2</b> curve.</td></tr>
       <tr><td><b>Canonical curve subset</b></td><td>Curves are the <b>full‑band (SU), PPM 0, RU‑index 1, AWGN, LDPC</b> operating point. Puncturing, other RUs, and non‑AWGN / real‑interference profiles are <b>not</b> modelled.</td></tr>
+      <tr><td><b>AWGN‑only channel (no multipath, no CFO)</b></td><td>The PER model is <b>AWGN only</b> — verified across the full <span class="file">.fig</span> set (78 figs / 25,536 curves, all <code>Channel = AWGN</code>) — with <b>no carrier‑frequency offset</b> (<code>PPM = 0</code>). <b>No channel‑D, no TGn/TGac multipath, nothing else.</b> Consequence: on the <b>raw AWGN curves</b> there is <b>no delay spread</b>, so a longer <b>GI</b> only adds cyclic‑prefix overhead with no robustness benefit → GI 0.8µs would always win. Channel length is therefore added on top by a <b>synthetic GI‑vs‑delay‑spread ISI penalty</b> (see the next row and <b>B2</b>), which makes GI selection meaningful.</td></tr>
+      <tr><td><b>Delay‑spread / GI penalty is a <span style="color:#b91c1c">synthetic</span> model</b></td><td>Because the curves are AWGN, channel length is added by a <b>synthetic (NOT empirical)</b> inter‑symbol‑interference model, not measured data. A channel profile carries an <b>RMS delay spread τ</b> (<code>small room 0.5µs</code>, <code>office 1µs</code>, <code>outdoor 3µs</code>). When <b>τ ≤ GI</b> the guard covers the echoes → <b>no effect</b> (pure AWGN). When <b>τ &gt; GI</b>, the tail leaks into the next symbol → an <b>SNR penalty</b> and an <b>irreducible PER floor</b>, both growing with the excess ratio <code>τ/GI − 1</code>. This makes GI selection meaningful (longer GI survives longer delay spread) but the numbers are <b>illustrative knobs, not calibrated to real channel measurements</b>. See <b>B2</b> for the exact model.</td></tr>
       <tr><td><b>PER curves = 4000‑byte packets</b></td><td>The measured PER curves were captured at a <b>fixed 4000‑byte packet (PSDU)</b>. Real traffic uses varying sizes, so PER (and thus SR) must be <b>adapted to the actual packet length</b> — a shorter packet has lower PER at the same SNR, a longer one higher (PER scales roughly with bit count). <b>Not yet applied here.</b></td></tr>
       <tr><td><b>Success‑Ratio driven, not SNR</b></td><td>The TLC decides on measured <b>Success Ratio</b> (like the firmware). SNR is used only to <b>synthesise</b> SR from the PER curve because there is no real radio; RSSI would be a fallback only.</td></tr>
+      <tr><td><b>Retry table (airtime fallback)</b></td><td>A failed primary transmission is <b>redelivered at a fallback rate</b>, so throughput <b>dips to ~the fallback rate, not to zero</b>. Built like the firmware (<code>_rsMngBuildRatesTbl</code>): entry 0 = the <b>sent rate</b> (the <i>test</i> rate during a probe), and the fallback ladder is taken from the <b>stable column</b> — during a <b>search cycle the retry table is still active</b> and its fallbacks are the <b>pre-search committed rate</b>, not the test column (for dwell/upscale the base is the primary). Modeled as an <b>airtime-weighted</b> delivery: effective tpt = delivered bits ÷ total airtime (failed attempt + successful retry). The <b>rate decision still uses the primary rate's SR</b> (which stays low), so a too-high rate is still abandoned — only the <i>throughput depth</i> is corrected. In the Simulation tab the achieved line turns <span style="color:#b91c1c;font-weight:700">red</span> while the retry table is backfilling. Approximation: per-rung mean (no per-MPDU BA bitmap, no explicit SIFS/BA/backoff overhead).</td></tr>
       <tr><td><b>PSD penalty is band-dependent</b></td><td>Selected by the <b>Band</b> control: <b>2.4 GHz</b> = total-power limited → full <b>−10·log₁₀(BW/20)</b> penalty; <b>5 GHz</b> = hybrid → penalty only above 80 MHz (<b>−10·log₁₀(BW/80)</b>); <b>6 GHz</b> = PSD-limited → <b>no penalty</b> (wider BW is free up to the total cap). See <b>§9 · TX power</b>. Still a proxy for the real SAR/TAS/PA/EIRP caps (table-driven, not a formula).
         <table class="pentbl">
           <tr><th>per-tone penalty (dB)</th><th>20</th><th>40</th><th>80</th><th>160</th><th>320</th></tr>
@@ -726,10 +729,11 @@ const FLOW = {
              {t:'proc',txt:'find active segment\n(by cumulative ms)'},
              {t:'dec',txt:'ramp? (snr_end set)\nyes: interpolate · no: constant'},
              {t:'proc',txt:'clamp SNR to dB range'},
-             {t:'out',txt:'ChannelState(snr_db, collision)'}], COLOR.B1),
-  B2: vflow([{t:'start',txt:'rate + channel SNR'},
+             {t:'out',txt:'ChannelState(snr_db, collision, τ)'}], COLOR.B1),
+  B2: vflow([{t:'start',txt:'rate + channel (SNR, τ)'},
              {t:'proc',txt:'look up rate\u2019s measured PER curve'},
-             {t:'proc',txt:'interp PER at SNR\n(1 below sweep · 0 above)'},
+             {t:'dec',txt:'τ > GI?\nyes: SNR penalty + PER floor (synthetic ISI)'},
+             {t:'proc',txt:'interp PER at (SNR − penalty)\n(1 below sweep · 0 above), apply floor'},
              {t:'proc',txt:'p_success = (1 − PER) × (1 − collision)'},
              {t:'out',txt:'PER = 1 − p_success'}], COLOR.B2),
   B3: vflow([{t:'start',txt:'rate table + channel'},
@@ -858,18 +862,50 @@ function funcs(rows){
 }
 
 const DATA = {
- B1:{role:"Ground-truth channel over time, in real SNR (dB). The TLC never sees it directly — only its effect through statistics. Configure a scenario as a list of segments (constant or ramp).",
-     io:io(["scenario segments","query time t"],"B1<br>Channel",["ChannelState { snr_db, collision }"],COLOR.B1),
-     funcs:funcs([["Channel(segments)","hold the scenario, precompute total time"],["from_config(list)","build from plain dicts"],["state(t_ms)","channel state at time t"]]),
-     tree:`<div class="sub">data: Seg</div><ul class="tree"><li><code>ms</code> — duration</li><li><code>snr_db</code> — SNR in dB (start)</li><li><code>snr_end?</code> — ramp target</li><li><code>collision</code> — 0..1</li></ul>`},
- B2:{role:"Data-driven PER: given ONE rate and the channel SNR, look up the rate\u2019s measured PER curve and interpolate. Entirely from real EHT PER-vs-SNR data — no sigmoid. Stateless.",
-     io:io(["Rate (from B3)","ChannelState (from B1)"],"B2<br>PER",["PER ∈ [0,1]"],COLOR.B2),
-     funcs:funcs([["per(rate, ch)","the PER function (flow →)"],["phy_per(rate, snr)","interp measured curve at SNR"],["sens_snr(rate)","measured sensitivity SNR (dB)"],["expected_tpt(rate)","ideal throughput of a rate"]]),
-     tree:`<div class="sub">PER LUT (per_lut.npz)</div><ul class="tree"><li>key = <code>bw,mcs,nss,gi</code></li><li>measured <code>SNR → PER</code> curve</li><li>interp: 100% below sweep, 0% above</li><li>296 curves from PERModel .fig set</li></ul>`},
+ B1:{role:"Ground-truth channel over time, in real SNR (dB). The TLC never sees it directly — only its effect through statistics. Configure a scenario as a list of segments (constant or ramp). Each segment also carries a channel profile (RMS delay spread τ).",
+     io:io(["scenario segments","query time t"],"B1<br>Channel",["ChannelState { snr_db, collision, delay_spread_us }"],COLOR.B1),
+     funcs:funcs([["Channel(segments)","hold the scenario, precompute total time"],["from_config(list)","build from plain dicts"],["state(t_ms)","channel state (SNR, collision, τ) at time t"]]),
+     tree:`<div class="sub">data: Seg</div><ul class="tree"><li><code>ms</code> — duration</li><li><code>snr_db</code> — SNR in dB (start)</li><li><code>snr_end?</code> — ramp target</li><li><code>collision</code> — 0..1</li><li><code>delay_spread_us</code> — RMS delay spread τ (0 = AWGN)</li><li><code>profile?</code> — name → τ (see below)</li></ul>
+           <div class="sub" style="margin-top:8px">channel profiles (τ, µs)</div><ul class="tree"><li><code>awgn</code> = 0.0 · <code>small room</code> = 0.5</li><li><code>office</code> = 1.0 · <code>outdoor</code> = 3.0</li><li>constant per segment (not ramped)</li><li>drives B2's synthetic GI/ISI penalty</li></ul>`},
+ B2:{role:"Data-driven PER: given ONE rate and the channel SNR, look up the rate\u2019s measured PER curve and interpolate. Entirely from real EHT PER-vs-SNR data — no sigmoid. Stateless. A SYNTHETIC delay-spread (ISI) penalty is layered on top so the guard interval matters.",
+     io:io(["Rate (from B3)","ChannelState { snr_db, collision, delay_spread_us } (from B1)"],"B2<br>PER",["PER ∈ [0,1]"],COLOR.B2),
+     funcs:funcs([["per(rate, ch)","AWGN PER + ISI penalty + collision (flow →)"],["phy_per(rate, snr)","interp measured AWGN curve at SNR"],["isi_penalty(gi_us, tau_us)","synthetic (snr_penalty, per_floor)"],["sens_snr(rate)","measured sensitivity SNR (dB)"]]),
+     tree:`<div class="sub">PER LUT (per_lut.npz)</div><ul class="tree"><li>key = <code>bw,mcs,nss,gi</code></li><li>measured <code>SNR → PER</code> curve (AWGN)</li><li>interp: 100% below sweep, 0% above</li><li>296 curves from PERModel .fig set</li></ul>`,
+     extra:`<div class="srnote">
+       <div class="sub" style="margin-top:16px">Delay-spread / guard-interval model <span style="color:#b91c1c;font-weight:800">(synthetic — not empirical)</span></div>
+       <p class="hint" style="margin-top:0">The measured curves are <b>AWGN</b> (no multipath), so on their own the guard interval only costs overhead and <b>GI 0.8µs always wins</b>. To make channel length matter, B1 tags each state with an <b>RMS delay spread τ</b> and B2 adds a <b>synthetic inter-symbol-interference (ISI)</b> term. These numbers are <b>illustrative knobs, not calibrated to real measurements.</b></p>
+       <div class="grid2" style="align-items:start">
+         <div class="flowbox">
+           <div class="sub">how it works</div>
+           <ul class="tree">
+             <li><b>τ ≤ GI</b> — the cyclic prefix covers the echoes → <b>no effect</b>, pure AWGN curve.</li>
+             <li><b>τ &gt; GI</b> — the tail leaks into the next symbol. Excess ratio <code>e = τ/GI − 1</code> drives:
+               <ul class="tree">
+                 <li>an <b>SNR penalty</b>: <code>ΔSNR = 6 dB × e</code> (curve shifts right)</li>
+                 <li>an <b>irreducible PER floor</b>: <code>floor = 0.5·(1 − e^(−e))</code></li>
+               </ul>
+             </li>
+             <li><code>per = 1 − (1 − max(PER_awgn(snr−ΔSNR), floor))·(1 − collision)</code></li>
+           </ul>
+           <p class="hint">GI in the sim is binary (<b>0.8</b> or <b>3.2 µs</b>); there is no 1.6 µs curve. Note the trade-off: the short GI's PER floor competes with the long GI's ~15% rate overhead, so <b>office often keeps GI 0.8</b> (its 11% floor is still cheaper) and only <b>outdoor</b> clearly forces GI 3.2.</p>
+         </div>
+         <div>
+           <div class="sub">effect at SNR 40 dB (MCS 13, MIMO, 320 MHz)</div>
+           <table class="pentbl">
+             <tr><th>Profile</th><th>τ (µs)</th><th>GI 0.8 penalty / floor</th><th>PER GI 0.8</th><th>PER GI 3.2</th></tr>
+             <tr><td>awgn</td><td>0.0</td><td class="z">none</td><td class="z">0.00</td><td class="z">0.00</td></tr>
+             <tr><td>small room</td><td>0.5</td><td class="z">none (τ ≤ 0.8)</td><td class="z">0.00</td><td class="z">0.00</td></tr>
+             <tr><td>office</td><td>1.0</td><td>1.5 dB / 0.11</td><td class="n">0.11</td><td class="z">0.00</td></tr>
+             <tr><td>outdoor</td><td>3.0</td><td class="n">16.5 dB / 0.47</td><td class="n">1.00</td><td class="z">0.00</td></tr>
+           </table>
+           <p class="hint"><b>Result:</b> small room keeps <b>GI 0.8</b> (τ fits the guard). At high SNR <b>office</b> also tends to keep GI 0.8 — its 11% ISI floor beats the long GI's ~15% overhead — while <b>outdoor</b> hits a near-total floor on the short GI and is forced to <b>GI 3.2</b>. GI selection is now meaningful, emerging from the existing SR-driven search with no special logic.</p>
+         </div>
+       </div>
+     </div>`},
  B3:{role:"LMAC + PHY surrogate. Applies the rate table over a window of frames against the PER model and aggregates txed/acked → Success Ratio. This block closes the loop.",
      io:io(["rate_table (from B4)","ChannelState (from B1)","window_frames"],"B3<br>Emulator",["WindowStats { txed, acked, sr }"],COLOR.B3),
      funcs:funcs([["simulate_window(table, ch, N)","transmit N frames at primary; count acks"]]),
-     tree:`<div class="sub">notes</div><ul class="tree"><li>reports the <b>primary</b> rate's Success Ratio</li><li>coarse mean, or Monte-Carlo draws</li><li class="up">Phase 2: full retry-chain + A-MPDU</li></ul>`,
+     tree:`<div class="sub">notes</div><ul class="tree"><li>reports the <b>primary</b> rate's Success Ratio</li><li>coarse mean, or Monte-Carlo draws</li><li class="ok">retry table modeled (airtime fallback)</li></ul>`,
      extra:`<div class="srnote">
        <div class="sub" style="margin-top:16px">What counts in the Success Ratio — and what should <i>not</i> drive the rate</div>
        <p class="hint" style="margin-top:0">SR is simply <code>acked ÷ txed</code> over the window. Two very different losses both lower it:
@@ -906,7 +942,7 @@ const DATA = {
              <tr><th>Loss type</th><th>In SR?</th><th>Rate-<br>dependent?</th><th>Correct response</th></tr>
              <tr><td>Channel error (PER — noise/SNR)</td><td class="z">✔ counts</td><td class="z">✔ yes</td><td>down-scale MCS / narrower BW</td></tr>
              <tr><td>Collision (contention / hidden node)</td><td class="z">✔ counts here</td><td class="n">✘ no</td><td>RTS/CTS protection — <b>hold the rate</b></td></tr>
-             <tr><td>Retries within the A-MPDU chain</td><td class="n">✘ not modeled</td><td>—</td><td>Phase-2 (full retry chain)</td></tr>
+             <tr><td>Retries within the A-MPDU chain</td><td class="z">✓ modeled (coarse)</td><td>—</td><td>airtime fallback — see Decisions</td></tr>
            </table>
            <p class="hint" style="margin-top:8px"><b>Why it matters:</b> the sim lumps both into one SR, so a collision burst pushes SR below 90% at <i>every</i> rate. The TLC reads that as "too fast" and keeps down-scaling — all the way to MCS 1 — yet SR never recovers (the loss is collisions, not the rate), so throughput collapses far below <code>best</code>. Real firmware separates the two: block-ACK/retry patterns distinguish a collision from a channel error, collision-only losses don't force a down-scale, and RTS/CTS is switched on instead.</p>
          </div>
