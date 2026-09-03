@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TLC Playground — how WiFi picks its speed</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --blue:#0071C5; --dark:#1F2A44; --green:#2E8B57; --orange:#E8820C;
@@ -237,9 +238,26 @@
       <h2>Channel scenario</h2>
       <div class="hint" style="margin-bottom:6px;">Each line: <code>ms, SNR[, SNR_end[, collision[, profile]]]</code>. Set <b>SNR_end</b> for a linear ramp; collision is a 0–1 fraction; <b>profile</b> = <code>awgn</code> / <code>small room</code> / <code>office</code> / <code>outdoor</code> (or a τ in µs) — omit to use the Live tab's Channel profile. Uses the Live tab's Max BW / Antennas / PSD settings.</div>
       <div class="scen" id="scnPresets"></div>
-      <textarea id="segs" spellcheck="false" style="width:100%;height:120px;margin-top:10px;font-family:Consolas,monospace;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;box-sizing:border-box;">1700, 40
-1700, 40, 6
-1600, 6, 40</textarea>
+      <textarea id="segs" spellcheck="false" style="width:100%;height:120px;margin-top:10px;font-family:Consolas,monospace;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;box-sizing:border-box;">1000, 50
+1000, 47
+1000, 44
+1000, 41
+1000, 38
+1000, 35
+1000, 32
+1000, 29
+1000, 26
+1000, 23
+1000, 20
+1000, 17
+1000, 14
+1000, 11
+1000, 8
+1000, 5
+1000, 2
+1000, -1
+1000, -4
+1000, -5</textarea>
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin-top:8px;cursor:pointer;"><input type="checkbox" id="warm" checked onchange="runScenario()"> Warm start (RSSI/SNR-seeded initial rate)</label>
       <button class="demoBtn" onclick="runScenario()">▶ Run scenario</button>
       <div class="note" id="scnKpi" style="margin-top:14px;font-family:Consolas,monospace;white-space:pre;font-size:13px;color:#334155;"></div>
@@ -252,6 +270,21 @@
   </div>
   <div>
     <div class="card">
+      <h2>TVA — per-step log</h2>
+      <div class="hint"><span style="color:#0b4f86;font-weight:600;">■ simulation (PR)</span> = TLC's committed primary rate (dominant config in the step); <span style="color:#5b21b6;font-weight:600;">■ genie</span> = best possible rate for that SNR; <span style="color:#1f6b45;font-weight:600;">■ lab log</span> = measured, matched by RSSI→SNR. Click a <b>zoom</b> radio to focus every plot on that step (double-click any plot to reset).</div>
+      <div id="scnStepTbl" style="overflow:auto;margin-top:8px;"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="demoBtn" onclick="saveXlsx()">📥 Save table → XLSX</button>
+        <button class="demoBtn" onclick="document.getElementById('labFile').click()">🔬 Compare with lab log (JSON)…</button>
+        <button id="labClear" class="demoBtn" style="display:none;" onclick="clearLab()">✕ Clear lab</button>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;" title="Equivalent SNR = lab RSSI(dBm) + this offset. Tune so the sweeps line up.">RSSI→SNR offset (dB)
+          <input id="labOffset" type="number" value="62" step="0.5" style="width:62px;" onchange="if(LAB_STEPS)renderStepTable(SCN_RECS,SCN_SEGS)"></label>
+        <button id="labAlign" class="demoBtn" style="display:none;" onclick="autoAlignKnee()" title="Set the offset so the MCS knee (where MCS first drops from its max) lines up between simulation and lab">🎯 Auto-align (MCS knee)</button>
+        <input id="labFile" type="file" accept=".json,application/json" style="display:none;" onchange="loadLabFile(event)">
+        <span id="labStatus" style="font-size:12px;color:#64748b;"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
       <h2>0 · Throughput over time — achieved vs best</h2>
       <div class="hint">Green step = achieved · <b style="color:#c0392b">red = retry table backfilling failed frames at a fallback rate</b> · purple = best possible · teal dashed = avg over last 100 ms · amber = SEARCH (numbered). <b>Drag on any chart to zoom them all; double-click to reset.</b></div>
       <canvas id="scnTpt" width="900" height="175" style="width:100%;"></canvas>
@@ -291,13 +324,35 @@
 
 <script src="per_lut.js"></script>
 <script>
-// --- Real HE/EHT 80MHz SISO GI 0.8us effective throughput (Mbps), MCS 0..13 ---
-const BASE_TPT = [30.6,61.2,91.8,122.5,183.7,245,275.6,306.2,367.5,408.3,459.3,510.4,547,604];
+// --- Firmware expected-throughput tables, taken verbatim from fw rateScaleMng.c `expectedTptHe`
+// (stored as Mbps×10). Indexed [BW]['08'|'32' (GI 0.8/3.2µs)][NSS 1|2] -> MCS 0..13. ---
+const EXP_TPT_HE = {
+  20:{ '32':{ 1:[62,124,186,248,372,497,559,621,745,828,932,1035,1060,1170],
+              2:[124,248,372,497,745,994,1118,1243,1491,1657,1864,2071,2030,2350] },
+       '08':{ 1:[73,146,219,292,438,585,658,731,877,975,1096,1218,1230,1360],
+              2:[146,292,438,585,877,1170,1316,1462,1755,1950,2193,2437,2480,2750] } },
+  40:{ '32':{ 1:[124,248,372,497,745,994,1118,1243,1491,1657,1864,2071,2230,2460],
+              2:[248,497,745,994,1491,1989,2237,2486,2983,3315,3729,4143,4270,4950] },
+       '08':{ 1:[146,292,438,585,877,1170,1316,1462,1755,1950,2193,2437,2600,2870],
+              2:[292,585,877,1170,1755,2340,2632,2925,3510,3900,4387,4875,5230,5780] } },
+  80:{ '32':{ 1:[260,520,780,1041,1561,2082,2342,2603,3123,3470,3904,4338,4690,5180],
+              2:[520,1041,1561,2082,3123,4165,4685,5206,6247,6941,7809,8677,9000,10430] },
+       '08':{ 1:[306,612,918,1225,1837,2450,2756,3062,3675,4083,4593,5104,5470,6040],
+              2:[612,1225,1837,2450,3675,4900,5512,6125,7350,8166,9187,10208,11010,12170] } },
+  160:{ '32':{ 1:[520,1041,1561,2082,3123,4165,4685,5206,6247,6941,7809,8677,9870,10900],
+               2:[1041,2082,3123,4165,6247,8330,9371,10412,12495,13883,15618,17354,18940,21960] },
+        '08':{ 1:[612,1225,1837,2450,3675,4900,5512,6125,7350,8166,9187,10208,11520,12720],
+               2:[1225,2450,3675,4900,7350,9800,11025,12250,14700,16333,18375,20416,23179,25630] } },
+  320:{ '32':{ 1:[1140,2260,3380,5260,6660,8810,9870,10900,12960,14320,15990,17630,18940,19320],
+               2:[2180,4250,6660,8810,12960,16980,18940,21960,26110,28800,32190,35430,38080,43380] },
+        '08':{ 1:[1340,2660,3970,5260,7800,10300,11520,12720,15110,16670,18600,21260,23170,25630],
+               2:[2570,4930,7800,10300,15110,20720,23170,25630,30430,33540,37200,42520,45720,50400] } },
+};
+const BASE_TPT = EXP_TPT_HE[80]['08'][1].map(v=>v/10);   // 80MHz/SISO/0.8µs slice — retained for MCS count/labels
 const MOD = ["BPSK 1/2","QPSK 1/2","QPSK 3/4","16QAM 1/2","16QAM 3/4","64QAM 2/3",
              "64QAM 3/4","64QAM 5/6","256QAM 3/4","256QAM 5/6","1024QAM 3/4","1024QAM 5/6",
              "4096QAM 3/4","4096QAM 5/6"];
-const BW_FACTOR = {20:0.25,40:0.5,80:1,160:2,320:4};
-const GI_FACTOR = 1.0, GI32_FACTOR = 0.85;    // 0.8us vs 3.2us
+const BW_FACTOR = {20:0.25,40:0.5,80:1,160:2,320:4};   // retained only to enumerate available bandwidths
 const BW_REF = 20;                            // PSD penalty reference bandwidth
 function psdPenDb(bw){ const c=document.getElementById('psd'); if(!(c&&c.checked)) return 0;
   const band=(document.getElementById('band')||{value:'6'}).value;
@@ -340,7 +395,8 @@ function predictSR(mcs,nss,bw,gi08,snr,intf){
   return Math.max(0,Math.min(99.5,sr));
 }
 function peakTpt(mcs,nss,bw,gi08){
-  return BASE_TPT[mcs]*BW_FACTOR[bw]*(nss==2?2:1)*(gi08?GI_FACTOR:GI32_FACTOR);
+  const t=EXP_TPT_HE[bw]; if(!t) return 0;                 // FW expectedTptHe lookup (Mbps×10)
+  const arr=t[gi08?'08':'32'][nss>=2?2:1]; return arr?(arr[mcs]||0)/10:0;
 }
 
 // Retry table (FW _rsMngBuildRatesTbl): entry 0 = the sent rate (the test rate during a probe);
@@ -609,7 +665,7 @@ function toggleDemo(){
 
 // ============ Scenario-over-time tab (closed-loop sim, ports tlcsim harness + ReferenceTLC) ============
 const BANDWIDTHS=[20,40,80,160,320];
-let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[];   // shared zoom window (ms) + search-cycle log
+let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[], SCN_SEGS=[], LAB_STEPS=null;   // shared zoom window (ms) + search-cycle log + parsed steps + loaded lab log
 const SCN_PAD={scnMcs:[34,48],scnTpt:[48,14],scnBw:[40,48],scnNss:[48,48],scnGi:[48,48]};
 const scnVis=r=>r.t+r.dt>=ZT0 && r.t<=ZT1;
 function scnXAxis(ctx,xTo,H,yoff){ ctx.fillStyle='#475569'; ctx.textAlign='center'; const t0=ZT0/1000,t1=ZT1/1000,sp=(t1-t0)||1,stp=Math.max(sp/6,0.0005),dec=sp<3?2:sp<12?1:0; for(let s=t0;s<=t1+1e-6;s+=stp){ ctx.fillText(s.toFixed(dec),xTo(s*1000),H-yoff); } }
@@ -651,6 +707,7 @@ const SCN_PRESETS={
   'interference burst':'1700, 35, -, 0.02\n1700, 35, -, 0.40\n1600, 35, -, 0.02',
   'sudden wall (LOS → long → LOS)':'1700, 40, -, 0, small room\n1700, 40, -, 0, outdoor\n1600, 40, -, 0, small room',
   'long fade':'1000, 45\n3000, 45, 2\n1000, 2, 45',
+  'TVA sweep (50→-5, 3 dB/s)':'1000, 50\n1000, 47\n1000, 44\n1000, 41\n1000, 38\n1000, 35\n1000, 32\n1000, 29\n1000, 26\n1000, 23\n1000, 20\n1000, 17\n1000, 14\n1000, 11\n1000, 8\n1000, 5\n1000, 2\n1000, -1\n1000, -4\n1000, -5',
 };
 (function(){ const box=document.getElementById('scnPresets'); if(box) for(const k in SCN_PRESETS){ const b=document.createElement('button'); b.textContent=k; b.onclick=()=>{ document.getElementById('segs').value=SCN_PRESETS[k]; runScenario(); }; box.appendChild(b); } })();
 
@@ -740,7 +797,7 @@ function runScenario(){
   TAU_OVERRIDE=null;                             // don't leak the override into the Live tab
   // rolling average achieved throughput over the last 100 ms
   { let lo=0,sumT=0,sumD=0; for(let i=0;i<recs.length;i++){ sumT+=recs[i].tpt*recs[i].dt; sumD+=recs[i].dt; while(recs[lo].t<recs[i].t-100){ sumT-=recs[lo].tpt*recs[lo].dt; sumD-=recs[lo].dt; lo++; } recs[i].avg100=sumD>0?sumT/sumD:recs[i].tpt; } }
-  SCN_RECS=recs; SCN_TOTAL=total; SCN_SC=tlc.scLog(); ZT0=0; ZT1=total; wireScnZoom();
+  SCN_RECS=recs; SCN_TOTAL=total; SCN_SC=tlc.scLog(); SCN_SEGS=segs; ZT0=0; ZT1=total; wireScnZoom();
   drawScenario(recs,total);
 }
 
@@ -770,7 +827,308 @@ function drawScenario(recs,total){
     'time in dwell : '+(dwell*100).toFixed(0)+' %';
   drawScnTpt(recs,total); drawScnMcs(recs,total); drawScnBw(recs,total); drawScnNss(recs,total); drawScnGi(recs,total);
   renderScLog(SCN_SC);
+  renderStepTable(recs,SCN_SEGS);
 }
+
+// Zoom every scenario plot to a step's time window, and sync the Live tab to that step's channel.
+function zoomStep(t0,t1,snr,col,tau){ if(!SCN_RECS) return; ZT0=Math.max(0,t0); ZT1=Math.min(SCN_TOTAL,t1); drawScenario(SCN_RECS,SCN_TOTAL);
+  if(snr!==undefined){ snr_.value=snr; intf_.value=Math.round((col||0)*100);
+    if(tau!=null){ const sel=document.getElementById('profile'); if(sel){ for(const k in PROFILE_TAU){ if(PROFILE_TAU[k]===tau){ sel.value=k; break; } } } }
+    upd(); }   // refresh the Live decision so switching tabs shows this step
+}
+
+// Per-step TVA summary: one row per scenario step, PR (dominant committed rate) vs genie (best possible) vs lab log.
+function nssTxtG(n){ return n===2?'MIMO':(n===1?'SISO':'\u2014'); }
+function giTxtG(g){ return g?'0.8\u00b5s':'3.2\u00b5s'; }
+// Aggregate the sim records into one object per scenario step (shared by the table and the XLSX export).
+function buildStepRows(recs,segs){
+  const lab=!!(LAB_STEPS&&LAB_STEPS.length);
+  const off=+((document.getElementById('labOffset')||{}).value)||0;
+  function matchLab(simSnr){ if(!lab) return null; let best=null,bd=1e9; for(const L of LAB_STEPS){ if(L.rssi==null)continue; const dd=Math.abs((L.rssi+off)-simSnr); if(dd<bd){bd=dd;best=L;} } return (best&&bd<=3)?best:null; }
+  function dominant(rs,keyFn){ const m={}; for(const r of rs){ const k=keyFn(r); (m[k]=m[k]||{dt:0,r}).dt+=r.dt; }
+    let best=null; for(const k in m){ if(!best||m[k].dt>best.dt) best=m[k]; } return best; }
+  const out=[]; let acc=0;
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i], t0=acc, t1=acc+s.ms; acc=t1;
+    const rs=recs.filter(r=>r.t>=t0 && r.t<t1); if(!rs.length) continue;
+    const stepDt=rs.reduce((a,r)=>a+r.dt,0)||1;
+    const prTpt=rs.reduce((a,r)=>a+r.tpt*r.dt,0)/stepDt;
+    const prSR=rs.reduce((a,r)=>a+r.sr*r.dt,0)/stepDt;
+    const geTpt=rs.reduce((a,r)=>a+r.best*r.dt,0)/stepDt;
+    const pr=dominant(rs,r=>r.mcs+'|'+r.bw+'|'+r.nss+'|'+(r.gi?1:0)).r;
+    const prDt=rs.filter(r=>r.mcs===pr.mcs&&r.bw===pr.bw&&r.nss===pr.nss&&r.gi===pr.gi).reduce((a,r)=>a+r.dt,0);
+    const ge=dominant(rs,r=>r.bestMcs+'|'+r.bestBw+'|'+r.bestNss+'|'+(r.bestGi?1:0)).r;
+    out.push({ step:i+1, snr:s.snr, t0, t1, col:s.col||0, tau:s.tau,
+      snrTxt:(s.se==null)?(''+s.snr):(s.snr+'\u2192'+s.se),
+      prTpt, prMcs:pr.mcs, prBw:pr.bw, prNss:pr.nss, prGi08:pr.gi, prSR, prPct:Math.round(prDt/stepDt*100),
+      geTpt, geMcs:ge.bestMcs, geBw:ge.bestBw, geNss:ge.bestNss, geGi08:ge.bestGi,
+      lab:matchLab(s.snr) });
+  }
+  return { rows:out, lab };
+}
+function renderStepTable(recs,segs){
+  const el=document.getElementById('scnStepTbl'); if(!el) return;
+  if(!recs||!recs.length||!segs||!segs.length){ el.innerHTML=''; return; }
+  const {rows:R, lab}=buildStepRows(recs,segs);
+  const labCells=L=> L?(
+      '<td class="l">'+(L.rssi!=null?L.rssi.toFixed(1):'\u2014')+'</td>'+
+      '<td class="l">'+(L.tpt!=null?(+L.tpt).toFixed(0):'\u2014')+'</td>'+
+      '<td class="l">'+(L.mcs!=null?L.mcs:'\u2014')+'</td>'+
+      '<td class="l">'+(L.bw!=null?L.bw:'\u2014')+'</td>'+
+      '<td class="l">'+nssTxtG(L.nss)+'</td>'+
+      '<td class="l">'+(L.gi08!=null?giTxtG(L.gi08):'\u2014')+'</td>'+
+      '<td class="l">'+(L.sr!=null?(L.sr*100).toFixed(0)+'%':'\u2014')+'</td>'
+    ):'<td class="l">\u2014</td><td class="l">\u2014</td><td class="l">\u2014</td><td class="l">\u2014</td><td class="l">\u2014</td><td class="l">\u2014</td><td class="l">\u2014</td>';
+  let rows='';
+  for(const r of R){
+    rows+='<tr>'+
+      '<td><input type="radio" name="stepZoom" title="zoom plots to this step + sync Live tab" onclick="zoomStep('+r.t0+','+r.t1+','+r.snr+','+r.col+','+(r.tau==null?'null':r.tau)+')"></td>'+
+      '<td>'+r.step+'</td>'+
+      '<td>'+r.snrTxt+'</td>'+
+      '<td class="s">'+r.prTpt.toFixed(0)+'</td>'+
+      '<td class="s">'+r.prMcs+'</td>'+
+      '<td class="s">'+r.prBw+'</td>'+
+      '<td class="s">'+nssTxtG(r.prNss)+'</td>'+
+      '<td class="s">'+giTxtG(r.prGi08)+'</td>'+
+      '<td class="s">'+(r.prSR*100).toFixed(0)+'%</td>'+
+      '<td class="s">'+r.prPct+'%</td>'+
+      '<td class="g">'+r.geTpt.toFixed(0)+'</td>'+
+      '<td class="g">'+r.geMcs+'</td>'+
+      '<td class="g">'+r.geBw+'</td>'+
+      '<td class="g">'+nssTxtG(r.geNss)+'</td>'+
+      '<td class="g">'+giTxtG(r.geGi08)+'</td>'+
+      (lab?labCells(r.lab):'')+
+    '</tr>';
+  }
+  const labHead=lab?('<th class="l">log<br>RSSI</th><th class="l">log tpt<br>(Mbps)</th><th class="l">log<br>MCS</th><th class="l">log<br>BW</th><th class="l">log<br>streams</th><th class="l">log<br>GI</th><th class="l">log<br>SR</th>'):'';
+  el.innerHTML=
+    '<style>#scnStepTbl table{border-collapse:collapse;font-size:12px;width:100%;}'+
+    '#scnStepTbl th,#scnStepTbl td{border:1px solid #e2e8f0;padding:3px 6px;text-align:center;white-space:nowrap;}'+
+    '#scnStepTbl th{background:#f1f5f9;color:#334155;position:sticky;top:0;}'+
+    '#scnStepTbl td.s{background:rgba(0,113,197,0.07);color:#0b4f86;}'+
+    '#scnStepTbl thead th.s{background:rgba(0,113,197,0.16);color:#0b4f86;}'+
+    '#scnStepTbl td.g{background:rgba(124,58,237,0.07);color:#5b21b6;}'+
+    '#scnStepTbl thead th.g{background:rgba(124,58,237,0.16);color:#5b21b6;}'+
+    '#scnStepTbl td.l{background:rgba(46,139,87,0.10);color:#1f6b45;}'+
+    '#scnStepTbl thead th.l{background:rgba(46,139,87,0.20);color:#1f6b45;}</style>'+
+    '<table><thead><tr>'+
+      '<th>zoom</th><th>#</th><th>SNR<br>(dB)</th>'+
+      '<th class="s">avg tpt<br>(Mbps)</th><th class="s">PR<br>MCS</th><th class="s">PR<br>BW</th><th class="s">PR<br>streams</th><th class="s">PR<br>GI</th><th class="s">PR<br>SR</th><th class="s">PR<br>%time</th>'+
+      '<th class="g">genie tpt<br>(Mbps)</th><th class="g">genie<br>MCS</th><th class="g">genie<br>BW</th><th class="g">genie<br>streams</th><th class="g">genie<br>GI</th>'+
+      labHead+
+    '</tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+// --- Lab log (SCD "sum" JSON) comparison ---------------------------------
+function parseLabRate(str){   // e.g. MCS13_320MHz_MIMO_GI_LTF0_OFDM_EHT / MCS1_320MHz_SISO_B_GI_LTF0_OFDM_EHT
+  const m=/MCS(\d+)/i.exec(str), b=/(\d+)MHz/i.exec(str);
+  return { mcs:m?+m[1]:null, bw:b?+b[1]:null,
+           nss:/MIMO/i.test(str)?2:(/SISO/i.test(str)?1:null),
+           gi08:/LTF3/i.test(str)?false:true };   // LTF3 = long GI (3.2us); LTF0/LTF1 -> short (0.8us)
+}
+function parseLabSum(j){
+  const out=[]; const arr=(j&&j.data)||[]; const el=arr.find(x=>x&&x.resource==='dut')||arr[0];
+  const steps=el&&el.data; if(!steps) return out;
+  for(const k of Object.keys(steps).sort((a,b)=>(+a)-(+b))){
+    const s=steps[k]; let res=null;
+    try{ res=s.UplinkFwDataPathAnalysis.results.dut.results[0]; }catch(e){}
+    if(!res) continue;
+    const rates=res.rates||{}; let dom=null,cnt=-1,succ=null;
+    for(const rk in rates){ if(rk==='TOTAL')continue; const rv=rates[rk];
+      if(rv&&typeof rv==='object'&&typeof rv.count==='number'&&rv.count>cnt){ cnt=rv.count; dom=rk; succ=rv.avg_success; } }
+    const rp=dom?parseLabRate(dom):{};
+    let rssi=null; try{ const a=res.rssi.rssi_bcn_a.average; if(a!=null) rssi=-a; }catch(e){}
+    out.push({idx:+k, att:s.att, tpt:s.tpt, rssi, sr:succ, mcs:rp.mcs, bw:rp.bw, nss:rp.nss, gi08:rp.gi08, rate:dom});
+  }
+  return out;
+}
+function loadLabFile(ev){
+  const f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  const st=document.getElementById('labStatus'); st.textContent='loading '+f.name+'\u2026';
+  const rd=new FileReader();
+  rd.onload=()=>{ try{ const j=JSON.parse(rd.result); const parsed=parseLabSum(j);
+      if(!parsed.length){ st.textContent='No steps found in file.'; return; }
+      LAB_STEPS=parsed; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
+      document.getElementById('labClear').style.display='';
+      document.getElementById('labAlign').style.display='';
+      autoAlignKnee(true);   // auto-align on load using the MCS knee
+      renderStepTable(SCN_RECS,SCN_SEGS);
+    }catch(e){ st.textContent='Parse error: '+e.message; } };
+  rd.onerror=()=>{ st.textContent='Could not read file.'; };
+  rd.readAsText(f); ev.target.value='';
+}
+function clearLab(){ LAB_STEPS=null; document.getElementById('labClear').style.display='none';
+  document.getElementById('labAlign').style.display='none';
+  document.getElementById('labStatus').textContent=''; renderStepTable(SCN_RECS,SCN_SEGS); }
+
+// Knee = the signal level (SNR or RSSI) where MCS first drops from its maximum as the link weakens.
+function mcsKnee(points){
+  const pts=points.filter(p=>p.mcs!=null&&isFinite(p.x)).sort((a,b)=>b.x-a.x);   // strongest signal first
+  if(!pts.length) return null;
+  const maxM=Math.max(...pts.map(p=>p.mcs));
+  for(let i=0;i<pts.length;i++){ if(pts[i].mcs<maxM){ const prev=i>0?pts[i-1].x:pts[i].x; return (prev+pts[i].x)/2; } }
+  return pts[pts.length-1].x;   // MCS never drops -> knee at the weakest point
+}
+// Align lab RSSI to sim SNR by making the two MCS knees coincide: offset = simKneeSNR - labKneeRSSI.
+function autoAlignKnee(silent){
+  if(!(SCN_RECS&&SCN_SEGS&&SCN_SEGS.length)){ if(!silent) alert('Run a scenario first.'); return; }
+  if(!(LAB_STEPS&&LAB_STEPS.length)){ if(!silent) alert('Load a lab log first.'); return; }
+  const {rows}=buildStepRows(SCN_RECS,SCN_SEGS);
+  const simKnee=mcsKnee(rows.map(r=>({x:r.snr,mcs:r.prMcs})));
+  const labKnee=mcsKnee(LAB_STEPS.map(L=>({x:L.rssi,mcs:L.mcs})));
+  const st=document.getElementById('labStatus');
+  if(simKnee==null||labKnee==null){ if(st) st.textContent='Could not find an MCS knee to align.'; return; }
+  const off=simKnee-labKnee;
+  document.getElementById('labOffset').value=off.toFixed(1);
+  if(st) st.textContent='MCS knee aligned: sim '+simKnee.toFixed(1)+' dB \u2194 lab RSSI '+labKnee.toFixed(1)+' dBm  \u2192  offset '+off.toFixed(1)+' dB';
+  renderStepTable(SCN_RECS,SCN_SEGS);
+}
+
+// 5 comparison charts (sim vs genie vs lab) rendered to a canvas and embedded in the XLSX.
+const CMP_CHARTS=[
+  {title:'Throughput (Mbps) — sim vs genie vs lab', get:r=>({s:r.prTpt,g:r.geTpt,l:r.lab?r.lab.tpt:null})},
+  {title:'MCS — sim vs genie vs lab', get:r=>({s:r.prMcs,g:r.geMcs,l:r.lab?r.lab.mcs:null}), yTicks:[0,2,4,6,8,10,12,13].map(v=>({v,t:''+v}))},
+  {title:'Bandwidth (MHz) — sim vs genie vs lab', get:r=>({s:r.prBw,g:r.geBw,l:r.lab?r.lab.bw:null}), yTicks:[20,40,80,160,320].map(v=>({v,t:''+v}))},
+  {title:'Guard interval — sim vs genie vs lab', get:r=>({s:r.prGi08?0.8:3.2,g:r.geGi08?0.8:3.2,l:r.lab?(r.lab.gi08?0.8:3.2):null}), yTicks:[{v:0.8,t:'0.8\u00b5s'},{v:3.2,t:'3.2\u00b5s'}]},
+  {title:'Streams (SISO/MIMO) — sim vs genie vs lab', get:r=>({s:r.prNss,g:r.geNss,l:r.lab?r.lab.nss:null}), yTicks:[{v:1,t:'SISO'},{v:2,t:'MIMO'}]},
+];
+function drawCompareChart(spec,rows,off){
+  const W=780,H=336,c=document.createElement('canvas'); c.width=W;c.height=H; const ctx=c.getContext('2d');
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  const padL=64,padR=120,padT=36,padB=50,plotW=W-padL-padR,plotH=H-padT-padB;
+  const vals=rows.map(spec.get);
+  let mn=Infinity,mx=-Infinity;
+  for(const v of vals) for(const k of ['s','g','l']){ const y=v[k]; if(y!=null&&isFinite(y)){ mn=Math.min(mn,y); mx=Math.max(mx,y); } }
+  if(spec.yTicks) for(const t of spec.yTicks){ mn=Math.min(mn,t.v); mx=Math.max(mx,t.v); }
+  if(!isFinite(mn)){mn=0;mx=1;} if(mx-mn<1e-6){mx=mn+1;}
+  const padY=(mx-mn)*0.10; mn-=padY; mx+=padY;
+  const X=i=>padL+(rows.length>1?i/(rows.length-1):0.5)*plotW;
+  const Y=v=>padT+plotH-((v-mn)/(mx-mn))*plotH;
+  ctx.fillStyle='#1F2A44'; ctx.font='bold 15px Segoe UI'; ctx.textAlign='left'; ctx.fillText(spec.title,padL,22);
+  ctx.font='11px Segoe UI';
+  const yt=spec.yTicks||Array.from({length:5},(_,k)=>{ const v=mn+(mx-mn)*k/4; return {v,t:v.toFixed(0)}; });
+  ctx.textAlign='right';
+  for(const t of yt){ const y=Y(t.v); ctx.strokeStyle='#eef2f7'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillStyle='#64748b'; ctx.fillText(t.t,padL-6,y+3); }
+  // dual x-axis: SNR (top) and the equivalent RSSI = SNR − offset (bottom)
+  const step=Math.max(1,Math.ceil(rows.length/12));
+  ctx.textAlign='center';
+  for(let i=0;i<rows.length;i+=step){ const x=X(i);
+    ctx.fillStyle='#334155'; ctx.fillText(''+rows[i].snr, x, H-padB+15);
+    ctx.fillStyle='#1f6b45'; ctx.fillText((rows[i].snr-(off||0)).toFixed(0), x, H-padB+30);
+  }
+  ctx.textAlign='right'; ctx.font='10px Segoe UI';
+  ctx.fillStyle='#334155'; ctx.fillText('SNR (dB)', padL-8, H-padB+15);
+  ctx.fillStyle='#1f6b45'; ctx.fillText('RSSI (dBm)', padL-8, H-padB+30);
+  ctx.font='11px Segoe UI';
+  const drawMarker=(type,x,y,r)=>{ ctx.beginPath();
+    if(type==='x'){ ctx.moveTo(x-r,y-r); ctx.lineTo(x+r,y+r); ctx.moveTo(x+r,y-r); ctx.lineTo(x-r,y+r); }
+    else if(type==='square'){ ctx.rect(x-r,y-r,2*r,2*r); }
+    else { ctx.arc(x,y,r,0,Math.PI*2); }
+    ctx.stroke(); };
+  const series=[['s','#0071C5','simulation','x'],['g','#7C3AED','genie','square'],['l','#2E8B57','lab log','circle']];
+  for(const [k,color,,mk] of series){
+    ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2; ctx.beginPath(); let started=false;
+    for(let i=0;i<rows.length;i++){ const v=vals[i][k]; if(v==null||!isFinite(v)){ started=false; continue; } const x=X(i),y=Y(v); started?ctx.lineTo(x,y):ctx.moveTo(x,y); started=true; }
+    ctx.stroke();
+    ctx.lineWidth=1.6;
+    for(let i=0;i<rows.length;i++){ const v=vals[i][k]; if(v==null||!isFinite(v))continue; drawMarker(mk,X(i),Y(v),3.4); }
+  }
+  let ly=padT+2; ctx.textAlign='left'; ctx.font='12px Segoe UI';
+  for(const [,color,name,mk] of series){ ctx.strokeStyle=color; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(W-padR+10,ly); ctx.lineTo(W-padR+32,ly); ctx.stroke(); ctx.lineWidth=1.6; drawMarker(mk,W-padR+21,ly,3.2); ctx.fillStyle='#334155'; ctx.fillText(name,W-padR+38,ly+4); ly+=20; }
+  return c;
+}
+function xlBorder(){ const s={style:'thin',color:{argb:'FFD5DBE3'}}; return {top:s,left:s,right:s,bottom:s}; }
+async function saveXlsx(){
+  const bs=buildStepRows(SCN_RECS||[],SCN_SEGS||[]); if(!bs.rows.length){ alert('Run a scenario first.'); return; }
+  const {rows:R, lab}=bs, name=(lab?'tva_sim_vs_lab':'tva_sim');
+  if(!window.ExcelJS){ return saveXlsxFallback(name); }
+  const FILL={s:'FFE3F0FB',g:'FFEFE7FB',l:'FFE2F1E9', sh:'FFBFDCF3',gh:'FFD9C9F5',lh:'FFC7E4D3', dh:'FFE2E8F0'};
+  const FONT={s:'FF0B4F86',g:'FF5B21B6',l:'FF1F6B45',d:'FF334155'};
+  // headers identical to the on-screen table
+  const cols=[
+    {h:'#',grp:'d',f:r=>r.step},
+    {h:'SNR (dB)',grp:'d',f:r=>r.snrTxt},
+    {h:'avg tpt (Mbps)',grp:'s',f:r=>Math.round(r.prTpt)},
+    {h:'PR MCS',grp:'s',f:r=>r.prMcs},
+    {h:'PR BW',grp:'s',f:r=>r.prBw},
+    {h:'PR streams',grp:'s',f:r=>nssTxtG(r.prNss)},
+    {h:'PR GI',grp:'s',f:r=>giTxtG(r.prGi08)},
+    {h:'PR SR',grp:'s',f:r=>Math.round(r.prSR*100)+'%'},
+    {h:'PR %time',grp:'s',f:r=>r.prPct+'%'},
+    {h:'genie tpt (Mbps)',grp:'g',f:r=>Math.round(r.geTpt)},
+    {h:'genie MCS',grp:'g',f:r=>r.geMcs},
+    {h:'genie BW',grp:'g',f:r=>r.geBw},
+    {h:'genie streams',grp:'g',f:r=>nssTxtG(r.geNss)},
+    {h:'genie GI',grp:'g',f:r=>giTxtG(r.geGi08)},
+  ];
+  if(lab) cols.push(
+    {h:'log RSSI',grp:'l',f:r=>r.lab&&r.lab.rssi!=null?+r.lab.rssi.toFixed(1):''},
+    {h:'log tpt (Mbps)',grp:'l',f:r=>r.lab&&r.lab.tpt!=null?Math.round(r.lab.tpt):''},
+    {h:'log MCS',grp:'l',f:r=>r.lab&&r.lab.mcs!=null?r.lab.mcs:''},
+    {h:'log BW',grp:'l',f:r=>r.lab&&r.lab.bw!=null?r.lab.bw:''},
+    {h:'log streams',grp:'l',f:r=>r.lab?nssTxtG(r.lab.nss):''},
+    {h:'log GI',grp:'l',f:r=>r.lab&&r.lab.gi08!=null?giTxtG(r.lab.gi08):''},
+    {h:'log SR',grp:'l',f:r=>r.lab&&r.lab.sr!=null?Math.round(r.lab.sr*100)+'%':''},
+  );
+  const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('TVA');
+  const hdr=ws.addRow(cols.map(c=>c.h)); hdr.height=30;
+  cols.forEach((c,i)=>{ const cell=hdr.getCell(i+1);
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:FILL[c.grp+'h']||FILL.dh}};
+    cell.font={bold:true,color:{argb:FONT[c.grp]||FONT.d}};
+    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true}; cell.border=xlBorder(); });
+  for(const r of R){ const row=ws.addRow(cols.map(c=>c.f(r)));
+    cols.forEach((c,i)=>{ const cell=row.getCell(i+1);
+      if(c.grp!=='d') cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:FILL[c.grp]}};
+      cell.font={color:{argb:FONT[c.grp]||FONT.d}}; cell.alignment={horizontal:'center'}; cell.border=xlBorder(); }); }
+  cols.forEach((c,i)=>{ ws.getColumn(i+1).width=Math.max(9,c.h.length+2); });
+  ws.views=[{state:'frozen',ySplit:1}];
+  // 5 comparison charts on a second sheet (embedded as images)
+  const off=+((document.getElementById('labOffset')||{}).value)||0;
+  const wsc=wb.addWorksheet('Charts');
+  for(let ci=0;ci<CMP_CHARTS.length;ci++){
+    const canvas=drawCompareChart(CMP_CHARTS[ci],R,off);
+    const b64=canvas.toDataURL('image/png').split(',')[1];
+    const id=wb.addImage({base64:b64,extension:'png'});
+    wsc.addImage(id,{ tl:{col:0.2,row:ci*18+0.3}, ext:{width:canvas.width,height:canvas.height} });
+  }
+  addRssiSnrSheet(wb,off);
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name+'.xlsx'; a.click(); URL.revokeObjectURL(a.href);
+}
+function saveXlsxFallback(name){
+  const tbl=document.querySelector('#scnStepTbl table'); if(!tbl){ alert('Run a scenario first.'); return; }
+  const clone=tbl.cloneNode(true); clone.querySelectorAll('tr').forEach(tr=>{ if(tr.firstElementChild) tr.removeChild(tr.firstElementChild); });
+  const blob=new Blob(['\ufeff<html><head><meta charset="utf-8"></head><body>'+clone.outerHTML+'</body></html>'],{type:'application/vnd.ms-excel'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name+'.xls'; a.click(); URL.revokeObjectURL(a.href);
+}
+// Explains the RSSI->SNR link-budget conversion used for the dual chart axis and lab alignment.
+function addRssiSnrSheet(wb,off){
+  const ws=wb.addWorksheet('RSSI to SNR');
+  ws.getColumn(1).width=14; ws.getColumn(2).width=72;
+  const title=t=>{ const r=ws.addRow([t,'']); ws.mergeCells(r.number,1,r.number,2); r.getCell(1).font={bold:true,color:{argb:'FF1F2A44'}}; };
+  const kv=(v,d,fill)=>{ const r=ws.addRow([v,d]); r.getCell(1).alignment={horizontal:'center'};
+    if(fill){ r.getCell(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}}; r.getCell(2).fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}}; } };
+  const BWm=320, NF=9, reqSnr=37.0;                          // worked-example parameters
+  const noiseFloor=-174+10*Math.log10(BWm*1e6)+NF;           // dBm
+  const estRssi=noiseFloor+reqSnr;                           // dBm
+  title('RSSI \u2194 SNR conversion (link budget)');
+  ws.addRow([]);
+  title('Formulas');
+  kv('', 'Noise Floor (dBm) = \u2212174 + 10\u00b7log10(BW_Hz) + Noise Figure');
+  kv('', 'SNR (dB) = RSSI (dBm) \u2212 Noise Floor');
+  kv('', 'RSSI (dBm) = SNR (dB) + Noise Floor');
+  kv('', 'chart RSSI axis = SNR \u2212 offset ; offset used here = '+off.toFixed(1)+' dB (= \u2212Noise Floor when derived from the link budget)');
+  ws.addRow([]);
+  title('Worked example \u2014 EHT, 0.8\u00b5s GI, 320 MHz, MCS13');
+  kv(-40, 'required dBm for MCS13 from RSSI model', 'FFEAF3FB');
+  kv(reqSnr, 'required SNR for 10% PER, EHT 0.8\u00b5s GI 320 MHz, from Philip PER model', 'FFEAF3FB');
+  kv(NF, 'Intel noise figure (dB)', 'FFEAF3FB');
+  kv(BWm, 'BW (MHz)', 'FFEAF3FB');
+  kv(+noiseFloor.toFixed(1), 'Calc Noise Floor = \u2212174 + 10\u00b7log10(320\u00d710^6) + 9', 'FFFDECEC');
+  kv(+estRssi.toFixed(1), 'Estimated RSSI = Noise Floor + required SNR', 'FFFDECEC');
+}
+
 function drawScnMcs(recs,total){
   const c=document.getElementById('scnMcs'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
   const padL=34,padR=48,padT=14,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
