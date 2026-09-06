@@ -280,14 +280,18 @@
       <div id="scnStepTbl" style="overflow:auto;margin-top:8px;"></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button class="demoBtn" onclick="saveXlsx()">📥 Save table → XLSX</button>
-        <button class="demoBtn" onclick="document.getElementById('labFile').click()">🔬 Compare with lab log (JSON)…</button>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;">Lab log
+          <select id="labPreset" style="font-size:12px;max-width:300px;"></select></label>
+        <button class="demoBtn" onclick="loadLabPreset()" title="Load the selected reference lab JSON from PERModel/RefTVA (Auto = pick by the Live tab's Max BW)">🔬 Compare with lab log</button>
+        <button class="demoBtn" onclick="document.getElementById('labFile').click()" title="Pick a different JSON file from disk">📂 Browse…</button>
         <button id="labClear" class="demoBtn" style="display:none;" onclick="clearLab()">✕ Clear lab</button>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;" title="Equivalent SNR = lab RSSI(dBm) + this offset. Tune so the sweeps line up.">RSSI→SNR offset (dB)
           <input id="labOffset" type="number" value="62" step="0.5" style="width:62px;" onchange="if(LAB_STEPS)renderStepTable(SCN_RECS,SCN_SEGS)"></label>
-        <button id="labAlign" class="demoBtn" style="display:none;" onclick="autoAlignKnee()" title="Set the offset so the MCS knee (where MCS first drops from its max) lines up between simulation and lab">🎯 Auto-align (MCS knee)</button>
+        <button id="labAlign" class="demoBtn" style="display:none;" onclick="autoAlignKnee()" title="Set the RSSI→SNR offset by matching per-MCS transitions between simulation and lab (robust median)">🎯 Auto-align (per-MCS)</button>
         <input id="labFile" type="file" accept=".json,application/json" style="display:none;" onchange="loadLabFile(event)">
         <span id="labStatus" style="font-size:12px;color:#64748b;"></span>
       </div>
+      <div id="labPath" style="margin-top:4px;font-size:11.5px;color:#1f6b45;font-family:Consolas,monospace;word-break:break-all;"></div>
     </div>
     <div class="card" style="margin-top:16px;">
       <h2>0 · Throughput over time — achieved vs best</h2>
@@ -681,7 +685,7 @@ function toggleDemo(){
 
 // ============ Scenario-over-time tab (closed-loop sim, ports tlcsim harness + ReferenceTLC) ============
 const BANDWIDTHS=[20,40,80,160,320];
-let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[], SCN_SEGS=[], LAB_STEPS=null;   // shared zoom window (ms) + search-cycle log + parsed steps + loaded lab log
+let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[], SCN_SEGS=[], LAB_STEPS=null, LAB_SRC='';   // shared zoom window (ms) + search-cycle log + parsed steps + loaded lab log + its source path
 const SCN_PAD={scnMcs:[34,48],scnTpt:[48,14],scnBw:[40,48],scnNss:[48,48],scnGi:[48,48]};
 const scnVis=r=>r.t+r.dt>=ZT0 && r.t<=ZT1;
 function scnXAxis(ctx,xTo,H,yoff){ ctx.fillStyle='#475569'; ctx.textAlign='center'; const t0=ZT0/1000,t1=ZT1/1000,sp=(t1-t0)||1,stp=Math.max(sp/6,0.0005),dec=sp<3?2:sp<12?1:0; for(let s=t0;s<=t1+1e-6;s+=stp){ ctx.fillText(s.toFixed(dec),xTo(s*1000),H-yoff); } }
@@ -964,39 +968,76 @@ function loadLabFile(ev){
   const rd=new FileReader();
   rd.onload=()=>{ try{ const j=JSON.parse(rd.result); const parsed=parseLabSum(j);
       if(!parsed.length){ st.textContent='No steps found in file.'; return; }
-      LAB_STEPS=parsed; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
+      LAB_STEPS=parsed; LAB_SRC=f.name; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
       document.getElementById('labClear').style.display='';
       document.getElementById('labAlign').style.display='';
+      const lp=document.getElementById('labPath'); if(lp) lp.textContent='Lab log: '+f.name+'  (local file \u2014 browser does not expose the full path)';
       autoAlignKnee(true);   // auto-align on load using the MCS knee
       renderStepTable(SCN_RECS,SCN_SEGS);
     }catch(e){ st.textContent='Parse error: '+e.message; } };
   rd.onerror=()=>{ st.textContent='Could not read file.'; };
   rd.readAsText(f); ev.target.value='';
 }
-function clearLab(){ LAB_STEPS=null; document.getElementById('labClear').style.display='none';
-  document.getElementById('labAlign').style.display='none';
-  document.getElementById('labStatus').textContent=''; renderStepTable(SCN_RECS,SCN_SEGS); }
 
-// Knee = the signal level (SNR or RSSI) where MCS first drops from its maximum as the link weakens.
-function mcsKnee(points){
-  const pts=points.filter(p=>p.mcs!=null&&isFinite(p.x)).sort((a,b)=>b.x-a.x);   // strongest signal first
-  if(!pts.length) return null;
-  const maxM=Math.max(...pts.map(p=>p.mcs));
-  for(let i=0;i<pts.length;i++){ if(pts[i].mcs<maxM){ const prev=i>0?pts[i-1].x:pts[i].x; return (prev+pts[i].x)/2; } }
-  return pts[pts.length-1].x;   // MCS never drops -> knee at the weakest point
+// Reference lab TVA SCD sum JSONs (PERModel/RefTVA), default chosen by the Live tab's Max BW.
+const REF_TVA_DIR='../PERModel/RefTVA/';
+const REF_TVA_FILES=[
+  'tva_11be_20mhz_uhbch69_tx_scd.json','tva_11be_20mhz_hbch149_tx_scd.json',
+  'tva_11be_40mhz_uhbch69_tx_scd.json','tva_11be_40mhz_hbch149_tx_scd.json','tva_11be_40mhz_below_lbch6_tx_scd.json',
+  'tva_11be_80mhz_uhbch69_tx_scd.json','tva_11be_80mhz_hbch149_tx_scd.json',
+  'tva_11be_160mhz_uhbch69_tx_scd.json','tva_11be_160mhz_uhbch213_tx_scd.json','tva_11be_160mhz_hbch36_tx_scd.json',
+  'tva_11be_320mhz_uhbch5_tx_scd.json','tva_ps_on_11be_320mhz_uhbch5_tx_scd.json',
+];
+const REF_TVA_BY_BW={20:'tva_11be_20mhz_uhbch69_tx_scd.json',40:'tva_11be_40mhz_uhbch69_tx_scd.json',80:'tva_11be_80mhz_uhbch69_tx_scd.json',160:'tva_11be_160mhz_uhbch69_tx_scd.json',320:'tva_11be_320mhz_uhbch5_tx_scd.json'};
+function defaultLabFileForBw(){ return REF_TVA_BY_BW[+((bw_||{}).value)] || REF_TVA_BY_BW[320]; }
+(function(){ const sel=document.getElementById('labPreset'); if(!sel) return;
+  sel.innerHTML='<option value="">Auto \u2014 by Max BW</option>'+REF_TVA_FILES.map(f=>'<option value="'+f+'">'+f+'</option>').join(''); })();
+async function loadLabPreset(){
+  const sel=document.getElementById('labPreset'); let fname=(sel&&sel.value)||defaultLabFileForBw();
+  const rel=REF_TVA_DIR+fname, full=new URL(rel,location.href).href;
+  const st=document.getElementById('labStatus'), lp=document.getElementById('labPath');
+  st.textContent='loading '+fname+'\u2026';
+  try{
+    const resp=await fetch(rel); if(!resp.ok) throw new Error('HTTP '+resp.status);
+    const parsed=parseLabSum(await resp.json());
+    if(!parsed.length){ st.textContent='No steps found in '+fname; return; }
+    LAB_STEPS=parsed; LAB_SRC=full; st.textContent=fname+' \u2014 '+parsed.length+' steps'+((sel&&!sel.value)?' (auto, Max BW '+(bw_||{}).value+' MHz)':'');
+    document.getElementById('labClear').style.display=''; document.getElementById('labAlign').style.display='';
+    if(lp) lp.textContent='Lab log: '+full;
+    autoAlignKnee(true); renderStepTable(SCN_RECS,SCN_SEGS);
+  }catch(e){
+    st.textContent='Could not fetch '+fname+' ('+e.message+') \u2014 opened as a local file? use \ud83d\udcc2 Browse\u2026 to pick it manually.';
+    if(lp) lp.textContent='Tried: '+full;
+  }
 }
-// Align lab RSSI to sim SNR by making the two MCS knees coincide: offset = simKneeSNR - labKneeRSSI.
+function clearLab(){ LAB_STEPS=null; LAB_SRC=''; document.getElementById('labClear').style.display='none';
+  document.getElementById('labAlign').style.display='none';
+  document.getElementById('labStatus').textContent=''; const lp=document.getElementById('labPath'); if(lp) lp.textContent='';
+  renderStepTable(SCN_RECS,SCN_SEGS); }
+
+// Robust RSSI->SNR offset: median over per-MCS transitions, excluding the saturated
+// top-MCS plateau (its width differs sim vs lab) and start-up artifacts.
+function alignOffset(simPts, labPts){
+  const simByM={}, labByM={};
+  for(const p of simPts){ if(p.mcs!=null){ (simByM[p.mcs]=simByM[p.mcs]||[]).push(p.x); } }
+  for(const p of labPts){ if(p.mcs!=null){ (labByM[p.mcs]=labByM[p.mcs]||[]).push(p.x); } }
+  const sk=Object.keys(simByM), lk=Object.keys(labByM); if(!sk.length||!lk.length) return null;
+  const maxM=Math.max(...sk.map(Number),...lk.map(Number));
+  const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+  const offs=[]; for(const k of sk){ const m=+k; if(m===maxM||!labByM[m]) continue; offs.push(mean(simByM[m])-mean(labByM[m])); }
+  if(!offs.length) return null; offs.sort((a,b)=>a-b); const n=offs.length;
+  return n%2? offs[(n-1)/2] : (offs[n/2-1]+offs[n/2])/2;
+}
+// Align lab RSSI to sim SNR by matching per-MCS transitions (robust to plateaus/artifacts).
 function autoAlignKnee(silent){
   if(!(SCN_RECS&&SCN_SEGS&&SCN_SEGS.length)){ if(!silent) alert('Run a scenario first.'); return; }
   if(!(LAB_STEPS&&LAB_STEPS.length)){ if(!silent) alert('Load a lab log first.'); return; }
   const {rows}=buildStepRows(SCN_RECS,SCN_SEGS);
-  const simKnee=mcsKnee(rows.map(r=>({x:r.snr,mcs:r.prMcs})));
-  const labKnee=mcsKnee(LAB_STEPS.map(L=>({x:L.rssi,mcs:L.mcs})));
+  const off=alignOffset(rows.map(r=>({x:r.snr,mcs:r.prMcs})), LAB_STEPS.map(L=>({x:L.rssi,mcs:L.mcs})));
   const st=document.getElementById('labStatus');
-  if(simKnee==null||labKnee==null){ if(st) st.textContent='Could not find an MCS knee to align.'; return; }
-  const off=simKnee-labKnee;
+  if(off==null){ if(st) st.textContent='Could not align (need overlapping MCS between sim and lab).'; return; }
   document.getElementById('labOffset').value=off.toFixed(1);
-  if(st) st.textContent='MCS knee aligned: sim '+simKnee.toFixed(1)+' dB \u2194 lab RSSI '+labKnee.toFixed(1)+' dBm  \u2192  offset '+off.toFixed(1)+' dB';
+  if(st) st.textContent='Aligned (median per-MCS transitions): offset '+off.toFixed(1)+' dB';
   renderStepTable(SCN_RECS,SCN_SEGS);
 }
 
@@ -1087,6 +1128,9 @@ async function saveXlsx(){
     {h:'log SR',grp:'l',f:r=>r.lab&&r.lab.sr!=null?Math.round(r.lab.sr*100)+'%':''},
   );
   const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('TVA');
+  let frozenRows=1;
+  if(lab && LAB_SRC){ const sr=ws.addRow(['Lab log source: '+LAB_SRC]); ws.mergeCells(sr.number,1,sr.number,cols.length);
+    sr.getCell(1).font={italic:true,color:{argb:'FF1F6B45'}}; sr.getCell(1).alignment={horizontal:'left'}; frozenRows=2; }
   const hdr=ws.addRow(cols.map(c=>c.h)); hdr.height=30;
   cols.forEach((c,i)=>{ const cell=hdr.getCell(i+1);
     cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:FILL[c.grp+'h']||FILL.dh}};
@@ -1097,7 +1141,7 @@ async function saveXlsx(){
       if(c.grp!=='d') cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:FILL[c.grp]}};
       cell.font={color:{argb:FONT[c.grp]||FONT.d}}; cell.alignment={horizontal:'center'}; cell.border=xlBorder(); }); }
   cols.forEach((c,i)=>{ ws.getColumn(i+1).width=Math.max(9,c.h.length+2); });
-  ws.views=[{state:'frozen',ySplit:1}];
+  ws.views=[{state:'frozen',ySplit:frozenRows}];
   // 5 comparison charts on a second sheet (embedded as images)
   const off=+((document.getElementById('labOffset')||{}).value)||0;
   const wsc=wb.addWorksheet('Charts');
