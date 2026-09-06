@@ -1,0 +1,275 @@
+{
+  "context": {
+    "test_name": "tva_11be_160mhz_hbch36_tx",
+    "domain": "",
+    "setup_name": "",
+    "canary_version": "",
+    "created": "2026-09-01 03:17:07.211201",
+    "mode": "Operational",
+    "context": null,
+    "guid": "",
+    "run_type": "Setup",
+    "comment": ""
+  },
+  "environment": {
+    "stations": {
+      "dut": {
+        "station_data": {
+          "name": "dut",
+          "dev_trace": null
+        }
+      }
+    },
+    "aps": {
+      "ap": {
+        "ap_data": {
+          "name": "ap",
+          "ap_type": "",
+          "fw_version": null
+        }
+      }
+    }
+  },
+  "test_db": {
+    "wifi_connection_config": [
+      {
+        "standard": "be",
+        "band": "5.2GHz",
+        "bw": 160,
+        "ch": 36,
+        "traffic_type": "TCP",
+        "is_mu_mimo": false,
+        "is_mu_ofdma": false,
+        "direction": "Tx"
+      }
+    ],
+    "ap_config": [
+      {
+        "ap_model": "asus_be"
+      }
+    ],
+    "station_configs": [
+      {
+        "os_type": "Windows",
+        "platform": "Nova Lake",
+        "silicon": "Pelican Peak 2"
+      }
+    ]
+  },
+  "data": [
+    {
+      "resource": "dut",
+      "data": {
+        "0": {
+          "guid": "",
+          "Stage": 0,
+          "att": 39,
+          "global_run": 1,
+          "rerun": 0,
+          "temp": "",
+          "tpt": 2410.8,
+          "verdict": true,
+          "IperfDataAnalysis": {
+            "name": "analysis_09a57311_0_3",
+            "guid": "",
+            "stage": {
+              "order": 0
+            },
+            "summary": "2383.29Mbps",
+            "duration": "00:011",
+            "results": {
+              "dut": {
+                "events": [
+                  [
+                    "0.00-1.00",
+                    1689.0,
+                    "2026-09-01T03:18:37.608112",
+                    "warm-up"
+                  ],
+                  [
+                    "1.00-2.00",
+                    2430.0,
+                    "2026-09-01T03:18:38.608345",
+                    "warm-up"
+                  ],
+                  [
+                    "2.00-3.00",
+                    2429.0,
+                    "2026-09-01T03:18:39.608060",
+                    "warm-up"
+                  ],
+                  [
+                    "3.00-4.00",
+                    2435.0,
+                    "2026-09-01T03:18:40.608347",
+                    "warm-up"
+                  ],
+                  [
+                    "4.00-5.00",
+                    2440.0,
+                    "2026-09-01T03:18:41.608116",
+                    "counted"
+                  ],
+                  [
+                    "5.00-6.00",
+                    2400.0,
+                    "2026-09-01T03:18:42.608106",
+                    "counted"
+                  ],
+                  [
+                    "6.00-7.00",
+                    2286.0,
+                    "2026-09-01T03:18:43.608137",
+                    "counted"
+                  ],
+                  [
+                    "7.00-8.00",
+                    2445.0,
+                    "2026-09-01T03:18:44.608371",
+                    "counted"
+                  ],
+                  [
+                    "8.00-9.00",
+                    2434.0,
+                    "2026-09-01T03:18:45.608202",
+                    "counted"
+                  ],
+                  [
+                    "9.00-10.00",
+                    2421.0,
+                    "2026-09-01T03:18:46.608426",
+                    "counted"
+                  ],
+                  [
+                    "10.00-11.00",
+                    2434.0,
+                    "2026-09-01T03:18:47.608295",
+                    "counted"
+                  ],
+                  [
+                    "11.00-12.00",
+                    2413.0,
+                    "2026-09-01T03:18:48.608236",
+                    "counted"
+                  ],
+                  [
+                    "12.00-13.00",
+                    2402.0,
+                    "2026-09-01T03:18:49.608293",
+                    "counted"
+                  ],
+                  [
+                    "13.00-14.00",
+                    2430.0,
+                    "2026-09-01T03:18:50.608240",
+                    "counted"
+                  ],
+                  [
+                    "14.00-15.00",
+                    2427.0,
+                    "2026-09-01T03:18:51.608404",
+                    "counted"
+                  ],
+                  [
+                    "15.00-16.00",
+                    2425.0,
+                    "2026-09-01T03:18:52.608451",
+                    "counted"
+                  ],
+                  [
+                    "16.00-17.00",
+                    2394.0,
+                    "2026-09-01T03:18:53.608292",
+                    "counted"
+                  ],
+                  [
+                    "17.00-18.00",
+                    2394.0,
+                    "2026-09-01T03:18:54.608478",
+                    "counted"
+                  ],
+                  [
+                    "18.00-19.00",
+                    2432.0,
+                    "2026-09-01T03:18:55.608547",
+                    "counted"
+                  ],
+                  [
+                    "19.00-20.00",
+                    2418.0,
+                    "2026-09-01T03:18:56.608343",
+                    "counted"
+                  ],
+                  [
+                    "20.00-21.00",
+                    2411.0,
+                    "2026-09-01T03:18:57.608336",
+                    "counted"
+                  ],
+                  [
+                    "21.00-22.00",
+                    2431.0,
+                    "2026-09-01T03:18:58.608458",
+                    "counted"
+                  ],
+                  [
+                    "22.00-23.00",
+                    2348.0,
+                    "2026-09-01T03:18:59.608585",
+                    "counted"
+                  ],
+                  [
+                    "23.00-24.00",
+                    2431.0,
+                    "2026-09-01T03:19:00.608413",
+                    "counted"
+                  ]
+                ],
+                "tpt_hist": {
+                  "average": 2383.29,
+                  "min": 1689.0,
+                  "max": 2445.0,
+                  "std": 148.57,
+                  "percent_under_threshold": 0.0,
+                  "bins_summary": [
+                    "1689.0 - 2445.0: 100.0%"
+                  ],
+                  "Description": "Iperf server data extraction"
+                },
+                "insights": ""
+              }
+            }
+          },
+          "MaxPerformanceAnalysis": {
+            "name": "analysis_f1464096_0_6",
+            "guid": "",
+            "stage": {
+              "order": 0
+            },
+            "summary": "",
+            "duration": "00:001",
+            "results": {
+              "dut": {
+                "insights": ""
+              }
+            }
+          },
+          "UplinkFwDataPathAnalysis": {
+            "name": "analysis_8b7ded2c_0_4",
+            "guid": "",
+            "stage": {
+              "order": 0
+            },
+            "summary": "No TpT WOI found",
+            "duration": "00:035",
+            "results": {
+              "dut": {
+                "results": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -16,7 +16,7 @@ The rate picker is chosen to maximize **effective throughput = peak_rate × Succ
 
 **What each one is:**
 - **▶ Playground** ([doc/tlc_playground.html](doc/tlc_playground.html)) — three tabs: **Live decision** (set the channel SNR and watch TLC pick MCS / streams / bandwidth / GI; all‑MCS PER‑vs‑SNR chart, fixed‑total‑power (PSD) penalty toggle, Mbps axis; Max BW defaults to **320 MHz**, MIMO), **Simulation** (closed‑loop scenario over time — throughput / MCS / BW / streams charts, numbered SEARCH bands, search‑cycle log, KPIs incl. *time between SC* and *SC duration*), and **Architecture** (the interactive block diagram embedded).
-- **▶ Interactive architecture** ([doc/tlc_playground.html#doc](doc/tlc_playground.html#doc)) — click blocks B1–B6 for I/O and flow diagrams; the integrated **PER Model Explorer** lives under **B2** (tabs for frame BW · channel BW · antenna · GI). Standalone copy kept at `doc/tlc_sim_architecture_old.html`.
+- **▶ Interactive architecture** ([doc/tlc_playground.html#doc](doc/tlc_playground.html#doc)) — click blocks B1–B6 for I/O and flow diagrams; the integrated **PER Model Explorer** lives under **B2** (tabs for frame BW · channel BW · antenna · GI). Standalone copy kept at `doc/tlc_sim_architecture.html`.
 - **▶ PER Model Explorer** ([doc/per_model_explorer.html](doc/per_model_explorer.html)) — every measured PER curve, per permutation, with a log‑axis toggle and CSV export.
 
 ## Quick start

@@ -2,7 +2,41 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-08-24.
+> Last updated: 2026-08-27.
+
+---
+
+## 0. How to begin a new chat (paste this as your first prompt)
+
+> I'm working on the TLC_Sim project (WiFi firmware TLC / rate-scaling teaching + simulation),
+> in the multi-root workspace folder `TLC_Sim`.
+>
+> First, read `doc/TLC_Sim_Handoff.md` end-to-end to load full context — it's the up-to-date
+> restart doc (project overview, the tlcsim/ B1–B6 engine, the browser playground, FW facts,
+> and this project's history incl. delay-spread profiles, the FW-faithful retry table §3.5,
+> and the collision/SR analysis §11).
+>
+> Key things to keep in mind:
+> - TWO engines that must stay in sync: the Python package `tlcsim/` (the real engine, run via
+>   run_example.py / gui.py) and the browser JS in `doc/tlc_playground.html` (teaching artifact).
+>   Any model change must be applied to BOTH.
+> - FW source of truth (read-only, in the `wcd_fw-dev` folder):
+>   fw/src/umac/main/dataPath/rateScaleMng/rateScaleMng.c (RS_MNG algorithm).
+> - Verify HTML/playground changes by reloading in the browser; verify Python with run_example.py.
+> - Git: current stable release is tag V1.0; latest work is committed (HEAD on main).
+>   Do NOT commit/push/stage unless I explicitly ask.
+>
+> My task: <describe the task here>
+
+**Non-negotiables for any session:**
+1. **Read this doc first** — it is the single source of restart context.
+2. **Two-engine parity** — every *model* change (PER, channel, retry table, ISI, thresholds)
+   goes into BOTH `tlcsim/` (Python) and `doc/tlc_playground.html` (JS). Test/dev-only tooling
+   can be Python-only, but note it.
+3. **FW is read-only truth** — `rateScaleMng.c` in `wcd_fw-dev`; never edit it, cite it.
+4. **Verify before claiming done** — Python via `run_example.py`; playground by reloading in the
+   browser (force cache-bust for the embedded VS Code browser — see §8).
+5. **Never commit/push/stage** unless explicitly asked. Stable release = tag `V1.0`; work on `main`.
 
 ---
 
@@ -187,7 +221,7 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 | File | What |
 |---|---|
 | `tlc_playground.html` | **Primary interactive artefact.** **Four** tabs (tab bar `.ptabbar` / `showTab()`, deep-linkable via `#live`/`#scenario`/`#doc`/`#improve`): **🎛 Live decision** (SNR slider → chosen MCS/streams/BW/GI, all-MCS PER-vs-SNR chart; controls: **Band** (2.4/5/6), **Channel profile / delay spread** (awgn/small room/office/outdoor → τ), Max BW (**def 320**), Antennas (**def 2/MIMO**), PSD-penalty toggle), **📈 Simulation** (closed-loop scenario over time: **5 charts** — 0 throughput (achieved/best/**avg 100 ms**; achieved turns **red** while the retry table backfills), 1 MCS+SNR, 2 BW+SNR, 3 streams+SNR, 4 **GI+SNR** — SEARCH bands numbered, search-cycle log, KPIs incl. **time between SC** / **SC duration**; **drag to zoom all charts**; preset format `ms, SNR[, SNR_end[, collision[, profile]]]` with per-segment channel profile; presets incl. **sudden wall (LOS → long → LOS)**), **🏗 Architecture** and **💡 Improvements** (both lazy-loaded iframes; footer hidden on these tabs). |
-| `tlc_sim_architecture_old.html` | The interactive architecture page (**renamed from `tlc_sim_architecture.html`**; now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6, 7 Decisions, 8 TLC flow, 9 TX power) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). **B3 now carries a "What counts in the Success Ratio" panel** (SR decomposition: channel PER vs collision, stacked-bar SVG + table). |
+| `tlc_sim_architecture.html` | The interactive architecture page (now embedded in the playground's Architecture tab **and** still standalone). Clickable B1–B6 block diagram + per-block detail (role, in/out mini-diagram, functions table, state trees, vertical flow, "Simple example"). **Left fixed POC/Contents nav** (`#poc`: 0 High level, 1 B1 … 6 B6, 7 Decisions, 8 TLC flow, 9 TX power) drives `show()` + scroll; the old middle B1–B6 tab-button row was removed. Integrated **PER Model Explorer** (`ex_`-prefixed, shown under B2). **B3 now carries a "What counts in the Success Ratio" panel** (SR decomposition: channel PER vs collision, stacked-bar SVG + table). |
 | `tlc_sim_improvements.html` | **NEW (2026-08-24)** — the **💡 Improvements** tab (4th playground tab, `#improve`; loaded as an iframe like Architecture). Left `#poc`-style **Ideas** nav (`ideaGo()`). **Idea 1 — Handle collision**: problem (blended SR), proposed algorithm (split channel vs collision, don't down-scale for contention, protect with RTS/CTS), how-to-distinguish table, expected-impact table, and a **Test — collision scenario** section (setup preset, A/B pass-fail criteria, control checks, Python CI hook). |
 | `per_model_explorer.html` | Standalone PER explorer — every measured PER curve per permutation, log-axis toggle, SNR marker, CSV export. |
 | `TLC_Sim_Plan.md` | Implementation plan (recommends binding real C `rateScaleMng` via USFSTL for true fidelity; two time regimes; simulated clock; phases; KPIs). |

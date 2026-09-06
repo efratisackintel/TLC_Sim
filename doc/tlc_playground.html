@@ -222,6 +222,11 @@
       <div style="font-size:12px;margin:-4px 0 8px;"><a href="per_model_explorer.html" target="_blank" style="color:var(--blue);font-weight:600;text-decoration:none;">↗ Open the full PER Model Explorer — clickable tabs for every column (BW · streams · GI)</a></div>
       <canvas id="perChart" width="580" height="190" style="width:100%;"></canvas>
       <div class="note" id="perNote"></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+        <label style="font-weight:600;margin:0;white-space:nowrap;font-size:13px;">Wanted SNR <span class="val" id="perSnrV" style="float:none;color:var(--blue);font-weight:700;">25 dB</span></label>
+        <input type="range" id="perSnr" min="-5" max="50" value="25" style="flex:1;height:6px;accent-color:var(--blue);">
+      </div>
+      <div id="perTable" style="overflow:auto;margin-top:8px;"></div>
     </div>
     <div class="card" style="margin-top:20px;">
       <h2>Retry table — plan B, C, D…</h2>
@@ -618,7 +623,7 @@ function drawPerCurve(b){
   ctx.beginPath(); ctx.moveTo(xc,padT); ctx.lineTo(xc,padT+plotH); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle='#1F2A44'; ctx.beginPath(); ctx.arc(xc,yTo(perNow),4.5,0,7); ctx.fill();
   ctx.textAlign='left'; ctx.font='bold 10px Segoe UI';
-  ctx.fillText('you: '+cur+' dB', Math.min(xc+8, W-padR-64), padT+11);
+  ctx.fillText('wanted: '+cur+' dB', Math.min(xc+8, W-padR-78), padT+11);
   ctx.fillStyle='#475569'; ctx.font='10px Segoe UI'; ctx.textAlign='center';
   ctx.fillText('SNR (dB) \u2192', padL+plotW/2, H-1);
   ctx.save(); ctx.translate(12,padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('PER',0,0); ctx.restore();
@@ -629,13 +634,24 @@ function drawPerCurve(b){
     list.length+' MCS curves \u2014 EHT, '+b.bw+' MHz, SU, '+antTxt+', '+(b.gi08?'0.8\u00b5s':'3.2\u00b5s')+' GI (AWGN, LDPC). '+
     'Numbers label each MCS at its 50% PER point; bold = TLC pick (MCS '+b.mcs+'). '+
     'At '+cur+' dB the pick sits at PER '+(perNow*100).toFixed(perNow<0.1?1:0)+'%.';
+  // per-MCS PER / SR at the wanted SNR (the dashed marker) — read off the point in a table
+  const pt=document.getElementById('perTable');
+  if(pt){ const hl=m=>m===b.mcs?' style="background:#eaf3fb;font-weight:700"':'';
+    const th='<tr><th>MCS</th>'+list.map(({m})=>'<th style="color:'+mcsColor(m)+(m===b.mcs?';background:#eaf3fb':'')+'">'+m+'</th>').join('')+'</tr>';
+    const perRow='<tr><th>PER @ '+cur+' dB</th>'+list.map(({m})=>{const v=perLookup(b.bw,m,b.nss,b.gi08,cur);return '<td'+hl(m)+'>'+(v*100).toFixed(v<0.1?1:0)+'%</td>';}).join('')+'</tr>';
+    const srRow='<tr><th>SR @ '+cur+' dB</th>'+list.map(({m})=>{const sr=predictSR(m,b.nss,b.bw,b.gi08,cur,+intf_.value);return '<td'+hl(m)+'>'+sr.toFixed(0)+'%</td>';}).join('')+'</tr>';
+    pt.innerHTML='<style>#perTable table{border-collapse:collapse;font-size:11.5px;width:100%}#perTable th,#perTable td{border:1px solid #e2e8f0;padding:2px 5px;text-align:center}#perTable th{background:#f1f5f9;color:#334155}</style><table>'+th+perRow+srRow+'</table>';
+  }
 }
 
 const snr_=document.getElementById('snr'), intf_=document.getElementById('intf'),
       bw_=document.getElementById('bw'), ant_=document.getElementById('ant');
 function upd(){document.getElementById('snrV').textContent=snr_.value+' dB';
-  document.getElementById('intfV').textContent=intf_.value+' %';decide();}
+  document.getElementById('intfV').textContent=intf_.value+' %';
+  const ps=document.getElementById('perSnr'); if(ps){ ps.value=snr_.value; const pv=document.getElementById('perSnrV'); if(pv) pv.textContent=snr_.value+' dB'; }
+  decide();}
 [snr_,intf_,bw_,ant_].forEach(e=>e.addEventListener('input',upd));
+const perSnr_=document.getElementById('perSnr'); if(perSnr_) perSnr_.addEventListener('input',()=>{ snr_.value=perSnr_.value; upd(); });
 const psd_=document.getElementById('psd'); if(psd_) psd_.addEventListener('change',upd);
 function preset(s,i,bw,ant){snr_.value=s;intf_.value=i;bw_.value=bw;ant_.value=ant;upd();}
 function onBandChange(){
@@ -696,7 +712,7 @@ function showTab(which){
   document.querySelectorAll('.ptab').forEach(b=>b.classList.toggle('active', b.dataset.tab===which));
   const ft=document.querySelector('footer'); if(ft) ft.style.display = (which==='doc'||which==='improve')?'none':'';
   if(which==='scenario' && !window._scnRan){ window._scnRan=true; runScenario(); }
-  if(which==='doc'){ const f=document.getElementById('docFrame'); if(!f.src) f.src='tlc_sim_architecture_old.html'; window.scrollTo(0,0); requestAnimationFrame(sizeDocFrame); }
+  if(which==='doc'){ const f=document.getElementById('docFrame'); if(!f.src) f.src='tlc_sim_architecture.html'; window.scrollTo(0,0); requestAnimationFrame(sizeDocFrame); }
   if(which==='improve'){ const f=document.getElementById('impFrame'); if(!f.src) f.src='tlc_sim_improvements.html'; window.scrollTo(0,0); requestAnimationFrame(sizeImpFrame); }
 }
 window.addEventListener('resize',()=>{ if(document.getElementById('tab-doc').style.display!=='none') sizeDocFrame(); if(document.getElementById('tab-improve').style.display!=='none') sizeImpFrame(); });
@@ -1102,31 +1118,30 @@ function saveXlsxFallback(name){
   const blob=new Blob(['\ufeff<html><head><meta charset="utf-8"></head><body>'+clone.outerHTML+'</body></html>'],{type:'application/vnd.ms-excel'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name+'.xls'; a.click(); URL.revokeObjectURL(a.href);
 }
-// Explains the RSSI->SNR link-budget conversion used for the dual chart axis and lab alignment.
+// SNR->RSSI worked example (EHT 0.8us MCS13): link budget with NF + RSSI implementation margin vs the RSSI->MCS SAS model.
 function addRssiSnrSheet(wb,off){
   const ws=wb.addWorksheet('RSSI to SNR');
-  ws.getColumn(1).width=14; ws.getColumn(2).width=72;
-  const title=t=>{ const r=ws.addRow([t,'']); ws.mergeCells(r.number,1,r.number,2); r.getCell(1).font={bold:true,color:{argb:'FF1F2A44'}}; };
-  const kv=(v,d,fill)=>{ const r=ws.addRow([v,d]); r.getCell(1).alignment={horizontal:'center'};
-    if(fill){ r.getCell(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}}; r.getCell(2).fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}}; } };
-  const BWm=320, NF=9, reqSnr=37.0;                          // worked-example parameters
-  const noiseFloor=-174+10*Math.log10(BWm*1e6)+NF;           // dBm
-  const estRssi=noiseFloor+reqSnr;                           // dBm
-  title('RSSI \u2194 SNR conversion (link budget)');
+  const NF=4, MARGIN=8, reqSnr=37.0;                              // Intel noise figure + RSSI implementation margin (SAS); required SNR from PER model
+  const modelRssi={320:-40,160:-42,80:-44.5,40:-47.5,20:-50.5};   // required RSSI for MCS13 from RSSI->MCS mapping (SAS)
+  const bws=[320,160,80,40,20];
+  const merge=(txt,italic)=>{ const r=ws.addRow([txt]); ws.mergeCells(r.number,1,r.number,7);
+    r.getCell(1).font=italic?{italic:true,color:{argb:'FF64748B'}}:{bold:true,size:12,color:{argb:'FF1F2A44'}}; };
+  merge('SNR \u2192 RSSI \u2014 worked example (EHT, 0.8\u00b5s GI, MCS13)', false);
+  merge('Noise Floor = \u2212174 + 10\u00b7log10(BW\u00d710^6) + Noise Figure + RSSI implementation Margin ;  Estimated RSSI = Noise Floor + required SNR', true);
+  merge('SNR from PER_Model_AllPermutations.xlsx (PER model) ; RSSI from model from RSSI_to_MCS_and_TpT_Mapping.xlsx (RSSI\u2192MCS SAS)', true);
   ws.addRow([]);
-  title('Formulas');
-  kv('', 'Noise Floor (dBm) = \u2212174 + 10\u00b7log10(BW_Hz) + Noise Figure');
-  kv('', 'SNR (dB) = RSSI (dBm) \u2212 Noise Floor');
-  kv('', 'RSSI (dBm) = SNR (dB) + Noise Floor');
-  kv('', 'chart RSSI axis = SNR \u2212 offset ; offset used here = '+off.toFixed(1)+' dB (= \u2212Noise Floor when derived from the link budget)');
-  ws.addRow([]);
-  title('Worked example \u2014 EHT, 0.8\u00b5s GI, 320 MHz, MCS13');
-  kv(-40, 'required dBm for MCS13 from RSSI model', 'FFEAF3FB');
-  kv(reqSnr, 'required SNR for 10% PER, EHT 0.8\u00b5s GI 320 MHz, from Philip PER model', 'FFEAF3FB');
-  kv(NF, 'Intel noise figure (dB)', 'FFEAF3FB');
-  kv(BWm, 'BW (MHz)', 'FFEAF3FB');
-  kv(+noiseFloor.toFixed(1), 'Calc Noise Floor = \u2212174 + 10\u00b7log10(320\u00d710^6) + 9', 'FFFDECEC');
-  kv(+estRssi.toFixed(1), 'Estimated RSSI = Noise Floor + required SNR', 'FFFDECEC');
+  const hdr=ws.addRow(['Noise figure (dB)','RSSI implementation Margin (dB)','BW (MHz)','Noise Floor (dBm)','required SNR (dB)','Estimated RSSI (dBm)','RSSI from model (dBm)']);
+  hdr.height=32;
+  hdr.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE2E8F0'}}; c.font={bold:true,color:{argb:'FF334155'}}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=xlBorder(); });
+  bws.forEach((bw,i)=>{
+    const nf=-174+10*Math.log10(bw*1e6)+NF+MARGIN;               // noise floor incl. NF + margin
+    const rssi=nf+reqSnr;
+    const row=ws.addRow([ i===0?NF:'', i===0?MARGIN:'', bw, +nf.toFixed(1), reqSnr, +rssi.toFixed(1), modelRssi[bw] ]);
+    row.eachCell(c=>{ c.alignment={horizontal:'center'}; c.border=xlBorder(); });
+    row.getCell(6).font={bold:true,color:{argb:'FF0B4F86'}};     // estimated RSSI
+    row.getCell(7).font={bold:true,color:{argb:'FF1F6B45'}};     // model RSSI
+  });
+  [16,26,10,16,15,18,18].forEach((w,i)=>ws.getColumn(i+1).width=w);
 }
 
 function drawScnMcs(recs,total){

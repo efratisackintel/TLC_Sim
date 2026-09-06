@@ -213,6 +213,7 @@
       <tr><td><b>Column climb via getBestRate</b></td><td>On a column/BW switch the search picks the lowest MCS whose throughput beats the stable column (mirrors firmware <code>_rsMngGetBestRate</code>). The full column graph / next‑columns table is simplified to ±1 BW · NSS · GI neighbours.</td></tr>
       <tr><td><b>Rate grid &amp; scope</b></td><td>MCS <b>0–13</b>, GI <b>0.8 / 3.2 µs</b>, collision as an independent loss factor. TPC, DCM, ER, STBC and legacy‑column nuances are out of scope.</td></tr>
       <tr><td><b>Not bit‑exact</b></td><td>A teaching / limit model of RS_MNG, not a line‑for‑line port of <code>rateScaleMng.c</code>.</td></tr>
+      <tr><td><b>RSSI ↔ SNR link budget (with an 8 dB margin)</b></td><td>Converting SNR to RSSI (dual chart axis, lab alignment, and the XLSX <i>RSSI to SNR</i> sheet) uses <code>NoiseFloor = &minus;174 + 10&middot;log10(BW) + NF + Margin</code> with <b>Intel noise figure &asymp; 4 dB</b> (firmware <code>SIM_GROUND_MARGIN</code> in <code>usimLibLmacTlc.c</code>) plus an <b>~8 dB RSSI implementation margin</b> so the calculated RSSI matches the driver's <b>RSSI&rarr;MCS mapping (SAS)</b>. That 8 dB is a <b>derived guardband</b> (RX implementation loss + front-end/antenna noise beyond the 4 dB modem NF + fading/operating margin), <b>not</b> an explicitly documented constant &mdash; the source is the <span class="file">RSSI to MCS Mapping SAS.docm</span> breakpoints, where the margin is implicit.</td></tr>
     </table>
   </div>
 
@@ -503,6 +504,20 @@
     <canvas id="ex_perChart" width="1080" height="300" style="width:100%;"></canvas>
     <div class="hint" id="ex_perNote"></div>
     <div id="ex_sensTable" style="margin-top:10px;"></div>
+
+    <h2 style="margin-top:18px;">SNR &rarr; RSSI &mdash; worked example (EHT, 0.8&micro;s GI, MCS13)</h2>
+    <p class="role" style="margin-top:-4px;">Convert the measured <b>required SNR</b> (for 10% PER, from the PER model) into a <b>required RSSI</b> via a link budget:<br>
+      <code>Noise Floor = &minus;174 + 10&middot;log10(BW&times;10<sup>6</sup>) + Noise Figure (4&nbsp;dB) + RSSI implementation Margin (8&nbsp;dB)</code> ,
+      <code>Estimated RSSI = Noise Floor + required SNR</code>.<br>
+      SNR from <span class="file">PER_Model_AllPermutations.xlsx</span> (Philip PER model); <b>RSSI from model</b> from <span class="file">RSSI_to_MCS_and_TpT_Mapping.xlsx</span> (RSSI&rarr;MCS SAS). The <b>8&nbsp;dB margin</b> is what makes the link-budget RSSI line up with the SAS mapping.</p>
+    <table class="exsens">
+      <tr><th>Noise figure (dB)</th><th>RSSI impl. Margin (dB)</th><th>BW (MHz)</th><th>Noise Floor (dBm)</th><th>required SNR (dB)</th><th>Estimated RSSI (dBm)</th><th>RSSI from model (dBm)</th></tr>
+      <tr><td>4</td><td>8</td><td>320</td><td>&minus;77</td><td>37</td><td><b>&minus;40</b></td><td>&minus;40</td></tr>
+      <tr><td></td><td></td><td>160</td><td>&minus;80</td><td>37</td><td><b>&minus;43</b></td><td>&minus;42</td></tr>
+      <tr><td></td><td></td><td>80</td><td>&minus;83</td><td>37</td><td><b>&minus;46</b></td><td>&minus;44.5</td></tr>
+      <tr><td></td><td></td><td>40</td><td>&minus;86</td><td>37</td><td><b>&minus;49</b></td><td>&minus;47.5</td></tr>
+      <tr><td></td><td></td><td>20</td><td>&minus;89</td><td>37</td><td><b>&minus;52</b></td><td>&minus;50.5</td></tr>
+    </table>
   </div>
 
   <div class="card" id="card_searchTime">
