@@ -277,6 +277,7 @@
       <li>For each candidate, <code>_rsMngGetBestRate()</code> picks the <b>lowest MCS whose expected tpt beats the current column</b> — not the incumbent's MCS.</li>
       <li>Run a short <b>test window</b> (<code>UPSCALE_AGG_FRAME_COUNT = 20</code> frames) at the candidate; measure SR × tpt.</li>
       <li class="up"><b>SWITCH_TO_TEST_COL</b> if it wins, else <b>REVERT_TO_STABLE_COL</b>.</li>
+      <li class="up"><b>Fallback = last known-good rate:</b> the revert target and the incumbent score are the last MCS that met the 90% hold threshold — <b>never a rate that just failed a probe</b>. On a PER cliff (e.g. MCS7 100% → MCS8 0%) this stops the search from “settling” back onto the dead MCS8.</li>
       <li>Telemetry: <code>SEARCH_CYCLE_START/END</code>, <code>TRY_COLUMN_SWITCH</code>, <code>SCALE_ACTION</code>.</li>
     </ul>
     <svg viewBox="0 -58 900 585" style="max-width:720px;margin:6px auto 2px;">
@@ -286,7 +287,7 @@
       </defs>
       <rect x="58" y="-52" width="394" height="38" rx="9" fill="#EDE9FE" stroke="#7C3AED" stroke-width="1.8"/>
       <text x="255" y="-37" text-anchor="middle" font-size="10.5" font-weight="800" fill="#5b21b6">① INIT (association) — RSSI/SNR-seeded start rate</text>
-      <text x="255" y="-24" text-anchor="middle" font-size="8.5" fill="#475569">good signal → max BW + MIMO, ~MCS 3   ·   else 20 MHz SISO</text>
+      <text x="255" y="-24" text-anchor="middle" font-size="8.5" fill="#475569">strong signal → high MCS + max BW + MIMO   ·   weak → low MCS, 20 MHz SISO</text>
       <line x1="255" y1="-14" x2="255" y2="8" stroke="#475569" stroke-width="1.6" marker-end="url(#fp)"/>
       <rect x="150" y="10" width="210" height="34" rx="16" fill="#E6F4F5" stroke="#0E7C86" stroke-width="2"/>
       <text x="255" y="32" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0E7C86">Stats window → SR, throughput</text>
@@ -333,7 +334,7 @@
       <text x="365" y="410" text-anchor="middle" font-size="12" font-weight="800" fill="#7a4a00">SEARCH CYCLE — change the column</text>
       <rect x="86" y="424" width="128" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
       <text x="150" y="454" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">1 · save</text>
-      <text x="150" y="468" text-anchor="middle" font-size="9.3" fill="#475569">stable column</text>
+      <text x="150" y="468" text-anchor="middle" font-size="9.3" fill="#475569">last good rate</text>
       <rect x="228" y="424" width="128" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
       <text x="292" y="450" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">2 · pick neighbour</text>
       <text x="292" y="464" text-anchor="middle" font-size="8.6" fill="#475569">getBestRate MCS</text>
@@ -342,7 +343,7 @@
       <text x="434" y="452" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">3 · test window</text>
       <text x="434" y="466" text-anchor="middle" font-size="8.6" fill="#475569">20 frames → SR×tpt</text>
       <rect x="512" y="424" width="132" height="70" rx="7" fill="#fff" stroke="#e0a56a"/>
-      <text x="578" y="450" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">4 · beats stable?</text>
+      <text x="578" y="450" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1F2A44">4 · beats last good?</text>
       <text x="578" y="466" text-anchor="middle" font-size="8.8" fill="#166534" font-weight="700">SWITCH</text>
       <text x="578" y="479" text-anchor="middle" font-size="8.8" fill="#b91c1c" font-weight="700">or REVERT</text>
       <line x1="214" y1="459" x2="226" y2="459" stroke="#475569" stroke-width="1.4" marker-end="url(#fp)"/>
@@ -351,7 +352,7 @@
       <polyline points="660,450 878,450 878,27 362,27" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#fpg)"/>
       <text x="884" y="250" font-size="9" fill="#94a3b8" font-weight="700" transform="rotate(-90 884,250)">→ resume STAY at winning column</text>
     </svg>
-    <p class="hint" style="margin-top:2px;"><b>What does "SR &lt; 90%" measure over?</b> The success ratio is computed per <b>statistics window counted in frames</b> — <b>2000</b> in the stable state, <b>20</b> in a probe/test — <i>not</i> over a fixed time. A window closes when its frame counter fills, so its wall-clock length depends on the traffic rate (~10–20 ms on a saturated link, hundreds of ms at realistic offered load). The 90% / 95% thresholds act on an <b>IIR-filtered</b> (EWMA) SR across those windows, not a single one.</p>
+    <p class="hint" style="margin-top:2px;"><b>What does "SR &lt; 90%" measure over?</b> The success ratio is computed per <b>statistics window counted in frames</b> — <b>2000</b> in the stable state, <b>20</b> in a probe/test — <i>not</i> over a fixed time. A window closes when its frame counter fills, so its wall-clock length depends on the traffic rate (~10–20 ms on a saturated link, hundreds of ms at realistic offered load). The 90% / 95% thresholds act on an <b>IIR-filtered</b> (EWMA) SR across those windows, not a single one. A <b>dwell that starts failing</b> (SR below the 15% force-down threshold) is <b>aborted within a short reaction window</b> rather than running the full 2000 frames — so a wrong rate commitment can't waste a whole optimal window (~300 ms at 20 MHz), and the search always <b>falls back to the last known-good rate</b>, never one that just failed.</p>
     <p class="hint" style="margin-top:-4px;"><b>It's a first-order IIR low-pass filter</b> (Infinite Impulse Response) — the same thing statistics calls an <b>EWMA</b> (exponentially-weighted moving average). One recursion: <code>s = α·new + (1−α)·s_prev</code> (here <code>α ≈ 0.4</code>: ~40% newest window, 60% history; a single pole at <code>1−α = 0.6</code>). It reacts quickly to a real change yet smooths single-window noise, so one unlucky window can't flip the decision — it "remembers" the last ~2 windows with exponentially fading weight, using just one multiply-add and one state variable.</p>
 
     <div class="sub">4 · Search-cycle start reasons (<code>_rsMngShouldStartSearchCycle</code>)</div>
@@ -369,6 +370,7 @@
       <li class="up"><b>Upscale</b> — needs a <b>probe</b>: the higher rate isn't in the table, so RS_MNG makes it the <b>test rate</b> (top of the table, 20-frame window) and sets <code>tryingRateUpscale</code>.</li>
       <li>Good probe → next action is STAY → the higher rate <b>becomes the PR</b> (table rebuilt around it). Bad probe → downscale back.</li>
       <li>Throttled by <code>UPSCALE_MAX_FREQUENCY</code>; a higher MCS that just failed is ignored for <code>UPSCALE_IGNORE_HIGHER_MCS = 1000 ms</code>. No throttle <i>inside</i> a search cycle.</li>
+      <li class="dn"><b>Fast-fail dwell:</b> an optimal (2000-frame) window whose SR collapses below the 15% force-down threshold is aborted after a short (~20-frame) reaction — <b>not</b> held for the whole window. The FW reacts within a few BlockAck stat updates, so a wrongly-committed rate can't waste a full optimal window (~300 ms at 20 MHz).</li>
       <li class="up"><b>Recovery / stale stats:</b> stats older than <code>RS_MNG_TIME_STAT_RESET_THRESHOLD</code> are <b>reset</b> (not blended with the old ~0 SR), and a power/RSSI change kicks a fresh search — so when a fade lifts, the TLC re-probes with a clean slate instead of crawling up through stale success ratios.</li>
     </ul>
 
@@ -407,7 +409,7 @@
 
     <div class="sub">9 · What this simulator models vs simplifies</div>
     <ul class="tree">
-      <li class="ok"><b>Models:</b> SR-driven decisions, RSSI/SNR warm start, expected-tpt column climb (<code>getBestRate</code>), <b>gated upscale + ignore-failed-MCS cooldown + stale-stat reset</b>, search triggers (success count/time, fail), STAY vs SEARCH, PER from measured curves.</li>
+      <li class="ok"><b>Models:</b> SR-driven decisions, RSSI/SNR warm start, expected-tpt column climb (<code>getBestRate</code>), <b>gated upscale + ignore-failed-MCS cooldown + stale-stat reset</b>, <b>last-known-good fallback + fast-fail dwell</b>, search triggers (success count/time, fail), STAY vs SEARCH, PER from measured curves.</li>
       <li class="dn"><b>Simplifies:</b> upscale is a gated step, not a real 20-frame test window; no offered-load clock (saturated link → compressed SC timing); retry table not executed (primary-rate SR only); no aggregation / AMSDU / TPC; column set = ±1 BW · NSS · GI, not the full 22-column graph.</li>
     </ul>
   </div>

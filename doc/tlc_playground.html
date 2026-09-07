@@ -332,6 +332,7 @@
 <footer>Success-Ratio–driven educational model. Success Ratio is derived from <b>measured HE/EHT PER-vs-SNR curves</b> (canonical AWGN, 0.8µs GI, MCS 0–13) — no sigmoid. TLC decides on measured Success Ratio, not SNR directly (RSSI is only a fallback). Not a bit-exact firmware simulation.</footer>
 
 <script src="per_lut.js"></script>
+<script src="lab_ref.js"></script>
 <script>
 // --- Firmware expected-throughput tables, taken verbatim from fw rateScaleMng.c `expectedTptHe`
 // (stored as Mbps×10). Indexed [BW]['08'|'32' (GI 0.8/3.2µs)][NSS 1|2] -> MCS 0..13. ---
@@ -685,7 +686,7 @@ function toggleDemo(){
 
 // ============ Scenario-over-time tab (closed-loop sim, ports tlcsim harness + ReferenceTLC) ============
 const BANDWIDTHS=[20,40,80,160,320];
-let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[], SCN_SEGS=[], LAB_STEPS=null, LAB_SRC='';   // shared zoom window (ms) + search-cycle log + parsed steps + loaded lab log + its source path
+let SCN_RECS=null, SCN_TOTAL=0, ZT0=0, ZT1=1, SCN_SC=[], SCN_SEGS=[], LAB_STEPS=null, LAB_SRC='', LAB_MODE='auto';   // ...loaded lab log + its source path + auto/user/cleared mode
 const SCN_PAD={scnMcs:[34,48],scnTpt:[48,14],scnBw:[40,48],scnNss:[48,48],scnGi:[48,48]};
 const scnVis=r=>r.t+r.dt>=ZT0 && r.t<=ZT1;
 function scnXAxis(ctx,xTo,H,yoff){ ctx.fillStyle='#475569'; ctx.textAlign='center'; const t0=ZT0/1000,t1=ZT1/1000,sp=(t1-t0)||1,stp=Math.max(sp/6,0.0005),dec=sp<3?2:sp<12?1:0; for(let s=t0;s<=t1+1e-6;s+=stp){ ctx.fillText(s.toFixed(dec),xTo(s*1000),H-yoff); } }
@@ -747,9 +748,10 @@ function chanAt(segs,t){ let acc=0;
 
 function makeTLC(maxBw,maxNss,MAXM,seed){
   const bws=BANDWIDTHS.filter(b=>b<=maxBw), nssOpts=maxNss>=2?[1,2]:[1];
-  const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300,UPGUARD:40,IGNORE:400,STALE:300};
+  const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300,UPGUARD:200,IGNORE:1000,STALE:300};
   let col=[1,bws[0],true], mcs=0, sr={}, srT={}, state='STAY', mode='search', succ=0, fail=0, lastEnd=-1e9, lastReason=null, pending=null, sq=[], best=null, target=0, stayPeak=0, scEvents=[], curSc=null, nextUp=0, avoidMcs=-1, avoidUntil=-1e9, stableCol=[1,bws[0],true], stableMcs=0;
   if(seed){ col=seed.col.slice(); mcs=seed.mcs; }   // warm start: RSSI/SNR-seeded initial rate (FW _rsMngSetInitRate)
+  let goodMcs=mcs, goodTpt=0;   // last MCS that met NODEC (search fallback)
   const key=(c,m)=>c[0]+','+c[1]+','+(c[2]?1:0)+','+m;
   const avgtpt=(c,m,s)=>s*peakTpt(m,c[0],c[1],c[2]);
   // FW _rsMngGetBestRate: lowest MCS in this column whose expected tpt beats the target
@@ -759,17 +761,18 @@ function makeTLC(maxBw,maxNss,MAXM,seed){
     const stable=(state==='SEARCH')?{mcs:stableMcs,nss:stableCol[0],bw:stableCol[1],gi08:stableCol[2]}:primary;   // FW: search fallbacks come from the stable column
     return {primary, stable, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
   // target = raw peak tpt of the stable column this dwell (matches bestRateForCol's raw compare)
-  function enter(s,t){ stableCol=col.slice(); stableMcs=mcs;   // remember the stable column before probing (FW: retry falls back to it)
-    const inc=avgtpt(col,mcs,s); target=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2])); best=[col.slice(),mcs,inc];
+  function enter(s,t){ const good=Math.min(mcs,goodMcs);   // never seed the search on a rate we just watched fail (FW: fall back to the stable rate)
+    stableCol=col.slice(); stableMcs=good;
+    target=Math.max(stayPeak,peakTpt(good,col[0],col[1],col[2])); best=[col.slice(),good,Math.max(goodTpt,avgtpt(col,good,s))];   // incumbent must be beaten to switch
     curSc={n:scEvents.length+1, t, reason:pending, from:[col.slice(),mcs], probes:[], to:null, switched:false}; scEvents.push(curSc);
     sq=neigh(); succ=fail=0; state='SEARCH'; mode='search'; col=sq.shift(); mcs=bestRateForCol(col,target); }
-  return { lq, scLog:()=>scEvents, onStats(txed,acked,t){
+  return { lq, C, scLog:()=>scEvents, onStats(txed,acked,t){
     const k=key(col,mcs), swin=acked/txed;
     const stale=srT[k]===undefined||(t-srT[k])>C.STALE, s=stale?swin:C.EWMA*swin+(1-C.EWMA)*sr[k];   // reset IIR when stats are stale (FW stat-reset) so recovery isn't dragged by old ~0 SR
     sr[k]=s; srT[k]=t;
     succ+=acked; fail+=txed-acked;
     if(state==='STAY'){
-      if(s>=C.NODEC) stayPeak=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2]));
+      if(s>=C.NODEC){ stayPeak=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2])); goodMcs=mcs; goodTpt=avgtpt(col,mcs,s); }   // remember last known-good rate
       let held=false;
       if(s<C.FORCE||(s<C.NODEC&&mcs>0)){ if(mcs>0){ avoidMcs=mcs; avoidUntil=t+C.IGNORE; mcs--; } }   // cooldown the MCS that just failed
       else if(s>=C.PERF&&mcs<MAXM){ const up=mcs+1; if((up===avoidMcs&&t<avoidUntil)||t<nextUp) held=true; else { mcs=up; nextUp=t+C.UPGUARD; } }   // gated upscale, skip a cooling MCS
@@ -802,12 +805,14 @@ function runScenario(){
   const warm=(document.getElementById('warm')||{checked:true}).checked;
   TAU_OVERRIDE=chanAt(segs,0).tau;               // seed uses the starting segment's delay spread
   const bcd0=bestCand(chanAt(segs,0).snr);   // FW-style: seed the initial rate from the starting SNR
-  const seed=warm?{col:[bcd0.nss,bcd0.bw,bcd0.gi],mcs:Math.max(0,Math.min(3,bcd0.mcs))}:null;
+  const seed=warm?{col:[bcd0.nss,bcd0.bw,bcd0.gi],mcs:Math.max(0,bcd0.mcs)}:null;
   const tlc=makeTLC(maxBw,maxNss,MAXM,seed); let lq=tlc.lq(), t=0; const recs=[]; let g=0;
   while(t<total && g++<60000){
-    const ch=chanAt(segs,t), N=lq.thold, p=lq.primary;
+    const ch=chanAt(segs,t), p=lq.primary; let N=lq.thold;
     TAU_OVERRIDE=ch.tau;                          // per-segment delay spread drives perLookup + bestCand
-    const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swin=(1-per)*(1-ch.col), acked=Math.round(N*swin);   // primary-rate SR drives the TLC decision (unchanged)
+    const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swin=(1-per)*(1-ch.col);   // primary-rate SR drives the TLC decision (unchanged)
+    if(lq.mode==='dwell' && swin<tlc.C.FORCE) N=tlc.C.SEARCH;   // FW aborts a failing rate within a few stat updates, not a full optimal window
+    const acked=Math.round(N*swin);
     const rt=retryTput(p,lq.stable,ch.snr,ch.col,frame*8);  // retry: fallbacks from the stable column (FW-faithful)
     const dt=N*rt.eT*1000;                          // window airtime incl. retries
     const bcd=bestCand(ch.snr);
@@ -818,6 +823,7 @@ function runScenario(){
   // rolling average achieved throughput over the last 100 ms
   { let lo=0,sumT=0,sumD=0; for(let i=0;i<recs.length;i++){ sumT+=recs[i].tpt*recs[i].dt; sumD+=recs[i].dt; while(recs[lo].t<recs[i].t-100){ sumT-=recs[lo].tpt*recs[lo].dt; sumD-=recs[lo].dt; lo++; } recs[i].avg100=sumD>0?sumT/sumD:recs[i].tpt; } }
   SCN_RECS=recs; SCN_TOTAL=total; SCN_SC=tlc.scLog(); SCN_SEGS=segs; ZT0=0; ZT1=total; wireScnZoom();
+  if(LAB_MODE==='auto'){ applyDefaultLab(); autoAlignKnee(true); }   // show lab comparison by default (bundled per Max BW)
   drawScenario(recs,total);
 }
 
@@ -968,7 +974,7 @@ function loadLabFile(ev){
   const rd=new FileReader();
   rd.onload=()=>{ try{ const j=JSON.parse(rd.result); const parsed=parseLabSum(j);
       if(!parsed.length){ st.textContent='No steps found in file.'; return; }
-      LAB_STEPS=parsed; LAB_SRC=f.name; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
+      LAB_STEPS=parsed; LAB_SRC=f.name; LAB_MODE='user'; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
       document.getElementById('labClear').style.display='';
       document.getElementById('labAlign').style.display='';
       const lp=document.getElementById('labPath'); if(lp) lp.textContent='Lab log: '+f.name+'  (local file \u2014 browser does not expose the full path)';
@@ -996,24 +1002,42 @@ async function loadLabPreset(){
   const sel=document.getElementById('labPreset'); let fname=(sel&&sel.value)||defaultLabFileForBw();
   const rel=REF_TVA_DIR+fname, full=new URL(rel,location.href).href;
   const st=document.getElementById('labStatus'), lp=document.getElementById('labPath');
+  if(location.protocol==='file:'){   // fetch of local files is blocked on file:// -> use the picker
+    st.textContent='Local file mode — pick '+fname+' (from PERModel/RefTVA) in the file dialog\u2026';
+    if(lp) lp.textContent='Expected file: '+full;
+    document.getElementById('labFile').click();
+    return;
+  }
   st.textContent='loading '+fname+'\u2026';
   try{
     const resp=await fetch(rel); if(!resp.ok) throw new Error('HTTP '+resp.status);
     const parsed=parseLabSum(await resp.json());
     if(!parsed.length){ st.textContent='No steps found in '+fname; return; }
-    LAB_STEPS=parsed; LAB_SRC=full; st.textContent=fname+' \u2014 '+parsed.length+' steps'+((sel&&!sel.value)?' (auto, Max BW '+(bw_||{}).value+' MHz)':'');
+    LAB_STEPS=parsed; LAB_SRC=full; LAB_MODE=(sel&&sel.value)?'user':'auto'; st.textContent=fname+' \u2014 '+parsed.length+' steps'+((sel&&!sel.value)?' (auto, Max BW '+(bw_||{}).value+' MHz)':'');
     document.getElementById('labClear').style.display=''; document.getElementById('labAlign').style.display='';
     if(lp) lp.textContent='Lab log: '+full;
     autoAlignKnee(true); renderStepTable(SCN_RECS,SCN_SEGS);
   }catch(e){
-    st.textContent='Could not fetch '+fname+' ('+e.message+') \u2014 opened as a local file? use \ud83d\udcc2 Browse\u2026 to pick it manually.';
+    st.textContent='Could not fetch '+fname+' ('+e.message+') \u2014 opening the file picker; pick it from PERModel/RefTVA.';
     if(lp) lp.textContent='Tried: '+full;
+    document.getElementById('labFile').click();
   }
 }
-function clearLab(){ LAB_STEPS=null; LAB_SRC=''; document.getElementById('labClear').style.display='none';
+function clearLab(){ LAB_STEPS=null; LAB_SRC=''; LAB_MODE='cleared'; document.getElementById('labClear').style.display='none';
   document.getElementById('labAlign').style.display='none';
   document.getElementById('labStatus').textContent=''; const lp=document.getElementById('labPath'); if(lp) lp.textContent='';
   renderStepTable(SCN_RECS,SCN_SEGS); }
+// Load the bundled RefTVA default for the current Max BW (no fetch needed; works on file://).
+function applyDefaultLab(){
+  if(typeof LAB_REF==='undefined') return false;
+  const bw=+((bw_||{}).value)||320, ref=LAB_REF[bw]||LAB_REF[320]; if(!ref) return false;
+  LAB_STEPS=ref.steps; LAB_SRC=ref.src+' (bundled default)'; LAB_MODE='auto';
+  const ce=document.getElementById('labClear'); if(ce) ce.style.display='';
+  const ae=document.getElementById('labAlign'); if(ae) ae.style.display='';
+  const st=document.getElementById('labStatus'); if(st) st.textContent=ref.src+' \u2014 '+ref.steps.length+' steps (auto, Max BW '+bw+' MHz)';
+  const lp=document.getElementById('labPath'); if(lp) lp.textContent='Lab log: '+ref.src+'  (bundled default for '+bw+' MHz \u2014 change via the dropdown / Browse)';
+  return true;
+}
 
 // Robust RSSI->SNR offset: median over per-MCS transitions, excluding the saturated
 // top-MCS plateau (its width differs sim vs lab) and start-up artifacts.

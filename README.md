@@ -54,7 +54,30 @@ Tools to extract the measured EHT PER curves from the MATLAB `.fig` set into a c
 
 > The raw `.fig` dataset (`PERModel/WiFi_EHT_Extended_HVT/`, ~135 MB) is **not** committed — regenerate the catalog from a local copy if needed.
 
+## TVA sim‑vs‑lab workbooks (`Results/`)
+
+Per‑bandwidth **TVA** (Throughput‑vs‑Attenuation) comparison of the simulated TLC against genie‑best and real lab logs, one `.xlsx` per BW.
+
+```powershell
+python PERModel\build_tva_compare.py    # → Results/tva_sim_vs_lab_{20,40,80,160,320}mhz.xlsx
+```
+
+- Generator: [PERModel/build_tva_compare.py](PERModel/build_tva_compare.py) — Python port of the playground TLC; sweeps SNR 44 → 2 dB, aggregates per step, auto‑aligns RSSI↔SNR, and matches lab summaries from `PERModel/RefTVA/*.json`.
+- Each workbook has a **TVA** sheet (sim / genie / lab columns, colour‑coded), a **Charts** sheet, and an **RSSI‑to‑SNR** sheet (live Excel formulas: Noise Floor, Estimated RSSI, RSSI‑to‑SNR Diff).
+
 ## Notes
 
 - The PER model is **Success‑Ratio driven** (measured PER → SR), not SNR‑driven; RSSI is only a fallback.
 - The playground's PSD penalty models fixed total TX power (≈ 3 dB less per subcarrier per bandwidth doubling), which makes the chosen bandwidth adapt with SNR.
+
+## Lessons learned — keeping the sim FW‑faithful
+
+Insights from aligning the simulated TLC to the real Rate‑Scale Manager (see **§8 · TLC flow** in the architecture doc). The sim tracks genie within ~99% and the lab logs across all bandwidths.
+
+- **Search fallback must be the last *known‑good* rate, not the current one.** Seeding a search cycle from the rate you just downscaled *from* (after a failure) makes the cycle "settle" back onto a dead rate. On a **PER cliff** (e.g. 20 MHz SNR 20: MCS7 = 100% SR, MCS8 = 0%) every probe reads 0, so nothing beats the failed seed and the sim commits a full 2000‑frame dwell (~300 ms) at 0% SR. Fall back to the last MCS that met the 90% hold threshold — this is what RS_MNG does.
+- **Detect a failing rate fast; don't burn the whole optimal window.** A 2000‑frame ("optimal") dwell only applies while the rate *works*. If SR collapses below the force‑down threshold, abort within a few frames — the FW reacts within a few BlockAck stat updates, not 2000 frames. A stale known‑good MCS can still leak across an SNR step, so this fast‑fail is the safety net.
+- **Match the FW's guard timers.** Upscale throttle ≈ **200 ms** (`RS_MNG_UPSCALE_MAX_FREQUENCY`) and avoid‑higher‑MCS cooldown ≈ **1 s** after a collapse. Too‑short guards make the sim re‑poke a failed rate every few frames and oscillate.
+- **Don't over‑clamp the warm start.** Seeding the initial MCS from RSSI/SNR (no artificial MCS≤3 cap) removes a spurious climb artifact at the top of each sweep; `_rsMngSetInitRate` seeds proportional to signal.
+- **Genie is an idealized upper bound; the lab averages over seconds.** Per‑step 1‑second sim windows expose transient mistakes that a ~7 s lab measurement averages out — so residual gaps at the very low‑SNR tail (near the noise floor) are expected, not bugs.
+- **Validate against instrumented per‑window traces, not intuition.** The 20 MHz gap looked like "search overhead"; a per‑window trace proved search was only ~3% of airtime and the real cause was one 300 ms dead dwell. Always confirm the mechanism before "fixing" it.
+

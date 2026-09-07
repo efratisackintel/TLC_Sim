@@ -107,12 +107,13 @@ def make_bestCand(maxBw, maxNss, MAXM, tau):
 class TLC:
     def __init__(self, maxBw, maxNss, MAXM, seed):
         self.bws = [b for b in BANDWIDTHS if b <= maxBw]; self.nssOpts = [1, 2] if maxNss >= 2 else [1]; self.MAXM = MAXM
-        self.C = dict(PERF=.95, NODEC=.90, FORCE=.15, SEARCH=20, DWELL=2000, EWMA=.4, SUCC=4500, FAIL=400, GUARD=300, UPGUARD=40, IGNORE=400, STALE=300)
+        self.C = dict(PERF=.95, NODEC=.90, FORCE=.15, SEARCH=20, DWELL=2000, EWMA=.4, SUCC=4500, FAIL=400, GUARD=300, UPGUARD=200, IGNORE=1000, STALE=300)
         self.col = [1, self.bws[0], True]; self.mcs = 0; self.sr = {}; self.srT = {}
         self.state = 'STAY'; self.mode = 'search'; self.succ = 0; self.fail = 0; self.lastEnd = -1e9
         self.lastReason = None; self.pending = None; self.sq = []; self.best = None; self.target = 0; self.stayPeak = 0
         self.nextUp = 0; self.avoidMcs = -1; self.avoidUntil = -1e9; self.stableCol = [1, self.bws[0], True]; self.stableMcs = 0
         if seed: self.col = list(seed['col']); self.mcs = seed['mcs']
+        self.goodMcs = self.mcs; self.goodTpt = 0.0   # last MCS that met NODEC (search fallback)
     def key(self, c, m): return f"{c[0]},{c[1]},{1 if c[2] else 0},{m}"
     def avgtpt(self, c, m, s): return s * peakTpt(m, c[0], c[1], c[2])
     def bestRateForCol(self, c, tgt):
@@ -132,8 +133,10 @@ class TLC:
         stable = dict(mcs=self.stableMcs, nss=self.stableCol[0], bw=self.stableCol[1], gi08=self.stableCol[2]) if self.state == 'SEARCH' else primary
         return dict(primary=primary, stable=stable, thold=self.C['DWELL'] if self.mode == 'dwell' else self.C['SEARCH'], mode=self.mode, state=self.state)
     def enter(self, s, t):
-        self.stableCol = list(self.col); self.stableMcs = self.mcs
-        self.target = max(self.stayPeak, peakTpt(self.mcs, self.col[0], self.col[1], self.col[2])); self.best = [list(self.col), self.mcs, self.avgtpt(self.col, self.mcs, s)]
+        good = min(self.mcs, self.goodMcs)   # never seed the search on a rate we just watched fail
+        self.stableCol = list(self.col); self.stableMcs = good
+        self.target = max(self.stayPeak, peakTpt(good, self.col[0], self.col[1], self.col[2]))
+        self.best = [list(self.col), good, max(self.goodTpt, self.avgtpt(self.col, good, s))]   # incumbent must be beaten to switch
         self.sq = self.neigh(); self.succ = self.fail = 0; self.state = 'SEARCH'; self.mode = 'search'; self.col = self.sq.pop(0); self.mcs = self.bestRateForCol(self.col, self.target)
     def onStats(self, txed, acked, t):
         C = self.C; k = self.key(self.col, self.mcs); swin = acked / txed
@@ -141,7 +144,9 @@ class TLC:
         s = swin if stale else C['EWMA'] * swin + (1 - C['EWMA']) * self.sr[k]
         self.sr[k] = s; self.srT[k] = t; self.succ += acked; self.fail += txed - acked
         if self.state == 'STAY':
-            if s >= C['NODEC']: self.stayPeak = max(self.stayPeak, peakTpt(self.mcs, self.col[0], self.col[1], self.col[2]))
+            if s >= C['NODEC']:
+                self.stayPeak = max(self.stayPeak, peakTpt(self.mcs, self.col[0], self.col[1], self.col[2]))
+                self.goodMcs = self.mcs; self.goodTpt = self.avgtpt(self.col, self.mcs, s)   # remember last known-good rate
             held = False
             if s < C['FORCE'] or (s < C['NODEC'] and self.mcs > 0):
                 if self.mcs > 0: self.avoidMcs = self.mcs; self.avoidUntil = t + C['IGNORE']; self.mcs -= 1
@@ -215,18 +220,22 @@ def parseLabSum(j):
 REF_BY_BW = {20: 'tva_11be_20mhz_uhbch69_tx_scd.json', 40: 'tva_11be_40mhz_uhbch69_tx_scd.json',
              80: 'tva_11be_80mhz_uhbch69_tx_scd.json', 160: 'tva_11be_160mhz_uhbch69_tx_scd.json',
              320: 'tva_11be_320mhz_uhbch5_tx_scd.json'}
-SNRS = [50, 47, 44, 41, 38, 35, 32, 29, 26, 23, 20, 17, 14, 11, 8, 5, 2, -1, -4, -5]
+SNRS = [44, 41, 38, 35, 32, 29, 26, 23, 20, 17, 14, 11, 8, 5, 2]
 
 def run_bw(bw, tau=0.0, maxNss=2, MAXM=13):
     total = len(SNRS) * 1000
     bestCand = make_bestCand(bw, maxNss, MAXM, tau)
     bcd0 = bestCand(SNRS[0])
-    seed = dict(col=[bcd0['nss'], bcd0['bw'], bcd0['gi']], mcs=max(0, min(3, bcd0['mcs'])))
+    seed = dict(col=[bcd0['nss'], bcd0['bw'], bcd0['gi']], mcs=max(0, bcd0['mcs']))
     tlc = TLC(bw, maxNss, MAXM, seed); lq = tlc.lq(); t = 0.0; frame = 1500; g = 0
     per_step = {}
+    C = tlc.C
     while t < total and g < 80000:
         g += 1; snr = SNRS[min(int(t // 1000), len(SNRS)-1)]; N = lq['thold']; p = lq['primary']
-        per = perLookup(p['bw'], p['mcs'], p['nss'], p['gi08'], snr, tau); swin = (1 - per); acked = round(N * swin)
+        per = perLookup(p['bw'], p['mcs'], p['nss'], p['gi08'], snr, tau); swin = (1 - per)
+        # FW aborts a failing rate within a few stat updates, not a full optimal window
+        if lq['mode'] == 'dwell' and swin < C['FORCE']: N = C['SEARCH']
+        acked = round(N * swin)
         tput, eT = retryTput(p, lq['stable'], snr, 0, frame*8, tau); dt = max(N * eT * 1000, 0.02)
         bcd = bestCand(snr); step = int(t // 1000)
         per_step.setdefault(step, []).append(dict(dt=dt, tput=tput, sr=swin, best=bcd['tpt'],
@@ -330,17 +339,20 @@ def write_xlsx(bw, rows, off, lab_src, path):
     rs = wb.create_sheet('RSSI to SNR')
     NF = 4; MARGIN = 8; reqSnr = 37.0; model = {320: -40, 160: -42, 80: -44.5, 40: -47.5, 20: -50.5}
     rs.append(['SNR \u2192 RSSI \u2014 worked example (EHT, 0.8\u00b5s GI, MCS13)'])
-    rs.append(['Noise Floor = \u2212174 + 10\u00b7log10(BW\u00d710^6) + Noise Figure + RSSI implementation Margin ; Estimated RSSI = Noise Floor + required SNR'])
+    rs.append(['Noise Floor = \u2212174 + 10\u00b7log10(BW\u00d710^6) + Noise Figure + RSSI implementation Margin ; Estimated RSSI = Noise Floor + required SNR ; RSSI to SNR Diff = \u2212Noise Floor (add to RSSI to get SNR)'])
     rs.append([])
-    rs.append(['Noise figure (dB)', 'RSSI implementation Margin (dB)', 'BW (MHz)', 'Noise Floor (dBm)', 'required SNR (dB)', 'Estimated RSSI (dBm)', 'RSSI from model (dBm)'])
-    for i in range(1, 8):
+    rs.append(['Noise figure (dB)', 'RSSI implementation Margin (dB)', 'BW (MHz)', 'Noise Floor (dBm)', 'required SNR (dB)', 'Estimated RSSI (dBm)', 'RSSI from model (dBm)', 'RSSI to SNR Diff (dB)'])
+    for i in range(1, 9):
         c = rs.cell(4, i); c.fill = PatternFill('solid', fgColor='E2E8F0'); c.font = Font(bold=True); c.alignment = Alignment('center', 'center', wrap_text=True); c.border = BORD
     for i, b in enumerate([320, 160, 80, 40, 20]):
-        nf = -174 + 10*math.log10(b*1e6) + NF + MARGIN; rssi = nf + reqSnr
-        rs.append([NF if i == 0 else '', MARGIN if i == 0 else '', b, round(nf, 1), reqSnr, round(rssi, 1), model[b]])
-        for j in range(1, 8):
-            rs.cell(5+i, j).alignment = Alignment(horizontal='center'); rs.cell(5+i, j).border = BORD
-    for i, w in enumerate([16, 26, 10, 16, 15, 18, 18], 1):
+        row = 5 + i
+        # NF & Margin are inputs (row 5 only); Noise Floor / RSSI / Diff are live Excel formulas
+        rs.append([NF if i == 0 else '', MARGIN if i == 0 else '', b,
+                   f'=-174 + 10*LOG10(C{row}*10^6) + $A$5 + $B$5', reqSnr,
+                   f'=D{row} + E{row}', model[b], f'=-D{row}'])
+        for j in range(1, 9):
+            rs.cell(row, j).alignment = Alignment(horizontal='center'); rs.cell(row, j).border = BORD
+    for i, w in enumerate([16, 26, 10, 16, 15, 18, 18, 18], 1):
         rs.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
     wb.save(path)
 
