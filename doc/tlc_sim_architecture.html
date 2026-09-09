@@ -12,7 +12,8 @@
   header{background:var(--dark);color:#fff;padding:16px 26px;}
   header h1{margin:0;font-size:23px;}
   header p{margin:4px 0 0;color:#b9c6d8;font-size:14px;}
-  .wrap{max-width:1160px;margin:0 auto;padding:22px;}
+  .layout{display:flex;align-items:flex-start;gap:20px;max-width:1400px;margin:0 auto;padding:0 16px;}
+  .wrap{flex:1;min-width:0;padding:22px 6px;}
   .card{background:#fff;border-radius:14px;padding:18px 22px;box-shadow:0 4px 14px rgba(20,40,80,.08);margin-bottom:22px;}
   h2{color:var(--blue);font-size:17px;margin:0 0 12px;}
   svg{width:100%;height:auto;display:block;}
@@ -69,19 +70,28 @@
   table.exsens th,table.exsens td{border:1px solid #e2e8f0;padding:4px 7px;text-align:center;}
   table.exsens th{background:#f1f5f9;color:var(--dark);}
   /* --- left POC / table of contents --- */
-  #poc{position:fixed;left:12px;top:90px;width:158px;z-index:60;display:flex;flex-direction:column;gap:6px;}
+  #poc{position:sticky;top:16px;flex:0 0 158px;width:158px;align-self:flex-start;margin-top:22px;max-height:calc(100vh - 32px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
   #poc .pochdr{font-size:10px;font-weight:800;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;margin:0 0 2px 2px;}
   #poc a{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--grey);background:#fff;border:1.5px solid #cbd5e1;border-radius:8px;padding:7px 10px;text-decoration:none;line-height:1.15;}
   #poc a small{display:block;font-size:10px;font-weight:600;color:#94a3b8;margin-top:1px;}
   #poc a:hover{border-color:var(--blue);}
   #poc a.active{background:var(--blue);color:#fff;border-color:transparent;}
   #poc a.active small{color:#dbeafe;}
-  @media(max-width:1460px){#poc{display:none;}}
+  @media(max-width:820px){#poc{display:none;}}
   table.pentbl{border-collapse:collapse;font-size:11px;margin:7px 0 2px;}
   table.pentbl th,table.pentbl td{border:1px solid #e2e8f0;padding:2px 8px;text-align:center;}
   table.pentbl th:first-child,table.pentbl td:first-child{text-align:left;white-space:nowrap;}
   table.pentbl th{background:#f1f5f9;color:var(--dark);}
   table.pentbl td.z{color:#166534;font-weight:700;} table.pentbl td.n{color:#b91c1c;}
+  /* --- expectedTptHe firmware tables (B4) --- */
+  .tptwrap{overflow-x:auto;margin:6px 0 4px;}
+  table.tpttbl{border-collapse:collapse;font-size:11px;width:100%;min-width:640px;}
+  table.tpttbl th,table.tpttbl td{border:1px solid #e2e8f0;padding:2px 5px;text-align:center;white-space:nowrap;}
+  table.tpttbl th{background:#eef4fb;color:var(--dark);font-weight:700;}
+  table.tpttbl td:first-child,table.tpttbl th:first-child,table.tpttbl td:nth-child(2),table.tpttbl th:nth-child(2){text-align:left;font-weight:700;}
+  table.tpttbl tr.mimo td{background:#f3edfd;color:#4c2a86;}
+  table.tpttbl tr.siso td{background:#fbfdff;color:#334155;}
+  table.tpttbl tr.mimo td:last-child,table.tpttbl tr.siso td:last-child{font-weight:700;}
 </style>
 </head>
 <body>
@@ -90,6 +100,7 @@
   <p>Click any block (B1–B6) for its inputs/outputs, functions, and a schematic <b>flow diagram</b> of what it does. Built from the real <span class="file">tlcsim/</span> code.</p>
 </header>
 
+<div class="layout">
 <nav id="poc">
   <div class="pochdr">Contents</div>
   <a data-poc="TOP" onclick="pocGo('TOP')" title="Block diagram overview">0 · High level</a>
@@ -654,7 +665,47 @@
     </p>
   </div>
 
+  <div class="card" id="card_expectedTpt">
+    <h2>Expected-throughput table — <code>expectedTptHe</code> (the FW rate → Mbps map)</h2>
+    <p class="hint">The TLC ranks every candidate rate by <b>averageTpt = Success-Ratio × expectedTpt</b>. The <code>expectedTpt</code> term is a fixed lookup — the nominal PHY throughput for each <b>BW · streams · GI · MCS</b> — taken <b>verbatim from the firmware</b>: <code>expectedTptHe[BW][GI][NSS][MCS]</code> in <span class="file">fw/src/umac/main/dataPath/rateScaleMng/rateScaleMng.c</span> (declared in <span class="file">_rateScaleMng.h</span>, read via <code>_rsMngGetExpectedTptTable()</code>). The sim mirrors these exact values. FW stores them as <b>Mbps × 10</b>; shown here in <b>Mbps</b>. This is the “genie / sim throughput” you see in the TVA workbooks — an <b>idealized upper bound</b>, so real lab throughput sits a bit below it.</p>
+
+    <div class="sub" style="margin-top:12px">Guard interval 0.8&nbsp;µs (short GI)</div>
+    <div class="tptwrap">
+<table class="tpttbl"><thead><tr><th>BW</th><th>NSS</th><th>M0</th><th>M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th><th>M6</th><th>M7</th><th>M8</th><th>M9</th><th>M10</th><th>M11</th><th>M12</th><th>M13</th></tr></thead><tbody>
+<tr class="mimo"><td>20</td><td>MIMO</td><td>14.6</td><td>29.2</td><td>43.8</td><td>58.5</td><td>87.7</td><td>117</td><td>131.6</td><td>146.2</td><td>175.5</td><td>195</td><td>219.3</td><td>243.7</td><td>248</td><td>275</td></tr>
+<tr class="siso"><td>20</td><td>SISO</td><td>7.3</td><td>14.6</td><td>21.9</td><td>29.2</td><td>43.8</td><td>58.5</td><td>65.8</td><td>73.1</td><td>87.7</td><td>97.5</td><td>109.6</td><td>121.8</td><td>123</td><td>136</td></tr>
+<tr class="mimo"><td>40</td><td>MIMO</td><td>29.2</td><td>58.5</td><td>87.7</td><td>117</td><td>175.5</td><td>234</td><td>263.2</td><td>292.5</td><td>351</td><td>390</td><td>438.7</td><td>487.5</td><td>523</td><td>578</td></tr>
+<tr class="siso"><td>40</td><td>SISO</td><td>14.6</td><td>29.2</td><td>43.8</td><td>58.5</td><td>87.7</td><td>117</td><td>131.6</td><td>146.2</td><td>175.5</td><td>195</td><td>219.3</td><td>243.7</td><td>260</td><td>287</td></tr>
+<tr class="mimo"><td>80</td><td>MIMO</td><td>61.2</td><td>122.5</td><td>183.7</td><td>245</td><td>367.5</td><td>490</td><td>551.2</td><td>612.5</td><td>735</td><td>816.6</td><td>918.7</td><td>1020.8</td><td>1101</td><td>1217</td></tr>
+<tr class="siso"><td>80</td><td>SISO</td><td>30.6</td><td>61.2</td><td>91.8</td><td>122.5</td><td>183.7</td><td>245</td><td>275.6</td><td>306.2</td><td>367.5</td><td>408.3</td><td>459.3</td><td>510.4</td><td>547</td><td>604</td></tr>
+<tr class="mimo"><td>160</td><td>MIMO</td><td>122.5</td><td>245</td><td>367.5</td><td>490</td><td>735</td><td>980</td><td>1102.5</td><td>1225</td><td>1470</td><td>1633.3</td><td>1837.5</td><td>2041.6</td><td>2317.9</td><td>2563</td></tr>
+<tr class="siso"><td>160</td><td>SISO</td><td>61.2</td><td>122.5</td><td>183.7</td><td>245</td><td>367.5</td><td>490</td><td>551.2</td><td>612.5</td><td>735</td><td>816.6</td><td>918.7</td><td>1020.8</td><td>1152</td><td>1272</td></tr>
+<tr class="mimo"><td>320</td><td>MIMO</td><td>257</td><td>493</td><td>780</td><td>1030</td><td>1511</td><td>2072</td><td>2317</td><td>2563</td><td>3043</td><td>3354</td><td>3720</td><td>4252</td><td>4572</td><td>5040</td></tr>
+<tr class="siso"><td>320</td><td>SISO</td><td>134</td><td>266</td><td>397</td><td>526</td><td>780</td><td>1030</td><td>1152</td><td>1272</td><td>1511</td><td>1667</td><td>1860</td><td>2126</td><td>2317</td><td>2563</td></tr>
+</tbody></table>
+    </div>
+
+    <div class="sub" style="margin-top:14px">Guard interval 3.2&nbsp;µs (long GI)</div>
+    <div class="tptwrap">
+<table class="tpttbl"><thead><tr><th>BW</th><th>NSS</th><th>M0</th><th>M1</th><th>M2</th><th>M3</th><th>M4</th><th>M5</th><th>M6</th><th>M7</th><th>M8</th><th>M9</th><th>M10</th><th>M11</th><th>M12</th><th>M13</th></tr></thead><tbody>
+<tr class="mimo"><td>20</td><td>MIMO</td><td>12.4</td><td>24.8</td><td>37.2</td><td>49.7</td><td>74.5</td><td>99.4</td><td>111.8</td><td>124.3</td><td>149.1</td><td>165.7</td><td>186.4</td><td>207.1</td><td>203</td><td>235</td></tr>
+<tr class="siso"><td>20</td><td>SISO</td><td>6.2</td><td>12.4</td><td>18.6</td><td>24.8</td><td>37.2</td><td>49.7</td><td>55.9</td><td>62.1</td><td>74.5</td><td>82.8</td><td>93.2</td><td>103.5</td><td>106</td><td>117</td></tr>
+<tr class="mimo"><td>40</td><td>MIMO</td><td>24.8</td><td>49.7</td><td>74.5</td><td>99.4</td><td>149.1</td><td>198.9</td><td>223.7</td><td>248.6</td><td>298.3</td><td>331.5</td><td>372.9</td><td>414.3</td><td>427</td><td>495</td></tr>
+<tr class="siso"><td>40</td><td>SISO</td><td>12.4</td><td>24.8</td><td>37.2</td><td>49.7</td><td>74.5</td><td>99.4</td><td>111.8</td><td>124.3</td><td>149.1</td><td>165.7</td><td>186.4</td><td>207.1</td><td>223</td><td>246</td></tr>
+<tr class="mimo"><td>80</td><td>MIMO</td><td>52</td><td>104.1</td><td>156.1</td><td>208.2</td><td>312.3</td><td>416.5</td><td>468.5</td><td>520.6</td><td>624.7</td><td>694.1</td><td>780.9</td><td>867.7</td><td>900</td><td>1043</td></tr>
+<tr class="siso"><td>80</td><td>SISO</td><td>26</td><td>52</td><td>78</td><td>104.1</td><td>156.1</td><td>208.2</td><td>234.2</td><td>260.3</td><td>312.3</td><td>347</td><td>390.4</td><td>433.8</td><td>469</td><td>518</td></tr>
+<tr class="mimo"><td>160</td><td>MIMO</td><td>104.1</td><td>208.2</td><td>312.3</td><td>416.5</td><td>624.7</td><td>833</td><td>937.1</td><td>1041.2</td><td>1249.5</td><td>1388.3</td><td>1561.8</td><td>1735.4</td><td>1894</td><td>2196</td></tr>
+<tr class="siso"><td>160</td><td>SISO</td><td>52</td><td>104.1</td><td>156.1</td><td>208.2</td><td>312.3</td><td>416.5</td><td>468.5</td><td>520.6</td><td>624.7</td><td>694.1</td><td>780.9</td><td>867.7</td><td>987</td><td>1090</td></tr>
+<tr class="mimo"><td>320</td><td>MIMO</td><td>218</td><td>425</td><td>666</td><td>881</td><td>1296</td><td>1698</td><td>1894</td><td>2196</td><td>2611</td><td>2880</td><td>3219</td><td>3543</td><td>3808</td><td>4338</td></tr>
+<tr class="siso"><td>320</td><td>SISO</td><td>114</td><td>226</td><td>338</td><td>526</td><td>666</td><td>881</td><td>987</td><td>1090</td><td>1296</td><td>1432</td><td>1599</td><td>1763</td><td>1894</td><td>1932</td></tr>
+</tbody></table>
+    </div>
+
+    <p class="hint" style="margin-top:10px"><b>Reading it:</b> higher MCS, wider BW, MIMO and short GI all raise the nominal rate — e.g. the top cell <b>320&nbsp;MHz · MIMO · 0.8&nbsp;µs · MCS13 = 5040&nbsp;Mbps</b> is exactly the genie throughput at high SNR in the 320&nbsp;MHz TVA sheet. The FW also holds a 1.6&nbsp;µs GI table and optional finer MCS (17/19/20/23) behind <code>DOT11BN_SUPPORT</code>, omitted here as the sim doesn't use them.</p>
+  </div>
+
 </div>
+</div><!-- layout -->
 
 <script src="per_catalog.js"></script>
 <script>
@@ -1001,6 +1052,7 @@ function show(id){
   const perEx=document.getElementById('perExplorer'); if(perEx) perEx.style.display = id==='B2'?'':'none';
   const cst=document.getElementById('card_searchTime'); if(cst) cst.style.display = id==='B4'?'':'none';
   const csc=document.getElementById('card_searchCond'); if(csc) csc.style.display = id==='B4'?'':'none';
+  const cet=document.getElementById('card_expectedTpt'); if(cet) cet.style.display = id==='B4'?'':'none';
   const cd=document.getElementById('card_decisions'); if(cd) cd.style.display='none';
   const cf=document.getElementById('card_flow'); if(cf) cf.style.display='none';
   const ctp=document.getElementById('card_txpower'); if(ctp) ctp.style.display='none';
@@ -1008,7 +1060,7 @@ function show(id){
 }
 
 function showExtra(cardId){
-  ['card_detail','perExplorer','card_searchTime','card_searchCond','card_decisions','card_flow','card_txpower'].forEach(x=>{ const e=document.getElementById(x); if(e) e.style.display='none'; });
+  ['card_detail','perExplorer','card_searchTime','card_searchCond','card_expectedTpt','card_decisions','card_flow','card_txpower'].forEach(x=>{ const e=document.getElementById(x); if(e) e.style.display='none'; });
   const dc=document.getElementById(cardId); if(dc){ dc.style.display=''; dc.scrollIntoView({behavior:'smooth',block:'start'}); }
 }
 

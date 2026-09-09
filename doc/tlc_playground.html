@@ -69,6 +69,45 @@
   .ptabbar{max-width:1250px;margin:14px auto -8px;padding:0 22px;display:flex;gap:6px;}
   .ptab{cursor:pointer;border:none;background:#e4ecf5;border-radius:10px 10px 0 0;padding:9px 18px;font-size:15px;font-weight:700;color:var(--grey);}
   .ptab.active{background:#fff;color:var(--blue);box-shadow:0 -3px 10px rgba(20,40,80,.06);}
+  /* --- inner sub-tabs (Simulation section) --- */
+  .subbar{max-width:1250px;margin:18px auto 0;padding:0 22px;display:flex;gap:8px;flex-wrap:wrap;}
+  .subtab{cursor:pointer;border:1.5px solid #cbd5e1;background:#fff;border-radius:20px;padding:7px 16px;font-size:13.5px;font-weight:700;color:var(--grey);transition:.15s;}
+  .subtab.active{background:var(--blue);color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(0,113,197,.3);}
+  /* --- Simulation left POC sidebar (mirrors architecture tab) --- */
+  .simlayout{display:flex;align-items:flex-start;gap:18px;max-width:1450px;margin:0 auto;padding:0 12px;}
+  .simcontent{flex:1;min-width:0;}
+  .simcontent .wrap,.simcontent .exwrap{max-width:none;margin:0;}
+  #simpoc{position:sticky;top:16px;flex:0 0 168px;width:168px;align-self:flex-start;margin-top:22px;max-height:calc(100vh - 32px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
+  #simpoc .pochdr{font-size:10px;font-weight:800;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;margin:0 0 2px 2px;}
+  #simpoc a{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--grey);background:#fff;border:1.5px solid #cbd5e1;border-radius:8px;padding:8px 10px;text-decoration:none;line-height:1.15;}
+  #simpoc a small{display:block;font-size:10px;font-weight:600;color:#94a3b8;margin-top:1px;}
+  #simpoc a:hover{border-color:var(--blue);}
+  #simpoc a.active{background:var(--blue);color:#fff;border-color:transparent;}
+  #simpoc a.active small{color:#dbeafe;}
+  @media(max-width:820px){#simpoc{display:none;}}
+  /* --- explainer cards (guide / for-dummies sub-tabs) --- */
+  .exwrap{max-width:1250px;margin:0 auto;padding:22px;}
+  .excard{background:var(--card);border-radius:14px;padding:24px 28px;box-shadow:0 4px 14px rgba(20,40,80,.08);margin-bottom:20px;}
+  .excard h2{margin:0 0 6px;font-size:20px;color:var(--blue);}
+  .excard h3{margin:20px 0 8px;font-size:16px;color:var(--dark);display:flex;align-items:center;gap:8px;}
+  .excard p{font-size:14.5px;line-height:1.65;color:#334155;margin:8px 0;}
+  .steps{list-style:none;padding:0;margin:12px 0;counter-reset:st;}
+  .steps>li{position:relative;padding:14px 16px 14px 56px;margin:10px 0;background:#f8fafc;border-radius:12px;border-left:5px solid var(--blue);font-size:14px;line-height:1.55;}
+  .steps>li:before{counter-increment:st;content:counter(st);position:absolute;left:14px;top:14px;width:28px;height:28px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;}
+  .steps>li b{color:var(--dark);}
+  .fieldtbl{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0;}
+  .fieldtbl th,.fieldtbl td{border:1px solid #e2e8f0;padding:8px 11px;text-align:left;vertical-align:top;}
+  .fieldtbl th{background:#f1f5f9;color:var(--dark);}
+  .fieldtbl code{background:#eef4fb;color:#0b4f86;padding:1px 5px;border-radius:4px;font-size:12.5px;}
+  .cardgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:14px 0;}
+  .icard{background:#f8fafc;border-radius:12px;padding:16px 18px;border-top:4px solid var(--blue);}
+  .icard .ic{font-size:30px;}
+  .icard h4{margin:6px 0 4px;font-size:15px;color:var(--dark);}
+  .icard p{margin:0;font-size:13px;color:#475569;line-height:1.5;}
+  .callout{background:#eaf3fb;border-left:5px solid var(--blue);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.6;}
+  .callout b{color:var(--blue);}
+  .analogy{background:#fff7ec;border-left:5px solid var(--orange);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14.5px;line-height:1.65;}
+  .analogy b{color:var(--orange);}
   #scnLog .scrow{padding:5px 6px;border-bottom:1px solid #eef2f7;line-height:1.4;font-size:12.5px;}
   #scnLog .scrow .t{color:#94a3b8;} #scnLog .scrow .pr{color:var(--blue);font-weight:600;}
   #scnLog .scrow .scr{font-size:10.5px;font-weight:700;padding:0 4px;border-radius:4px;}
@@ -237,7 +276,20 @@
   </div>
 </div>
 
-<div class="wrap" id="tab-scenario" style="display:none;">
+<div id="tab-scenario" style="display:none;">
+
+<div class="simlayout">
+<nav id="simpoc">
+  <div class="pochdr">Simulation</div>
+  <a data-sub="sim" class="active" onclick="showSub('sim')">📈 Simulation<small>charts &amp; run</small></a>
+  <a data-sub="engine" onclick="showSub('engine')">⚙️ Behind the scenes<small>the engine</small></a>
+  <a data-sub="guide" onclick="showSub('guide')">⚙️ How to configure<small>scenarios &amp; params</small></a>
+  <a data-sub="about" onclick="showSub('about')">💡 What is this?<small>for dummies</small></a>
+</nav>
+<div class="simcontent">
+
+<!-- ===== sub-tab 1: the simulation itself ===== -->
+<div class="wrap" id="sub-sim">
   <div>
     <div class="card">
       <h2>Channel scenario</h2>
@@ -280,16 +332,18 @@
       <div id="scnStepTbl" style="overflow:auto;margin-top:8px;"></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button class="demoBtn" onclick="saveXlsx()">📥 Save table → XLSX</button>
+        <button class="demoBtn" onclick="loadLabPreset()" title="Load the selected reference lab JSON from PERModel/RefTVA (Auto = pick by the Live tab's Max BW)">🔬 Compare with lab log</button>
+        <span id="labStatus" style="font-size:12px;color:#64748b;"></span>
+        <input id="labFile" type="file" accept=".json,application/json" style="display:none;" onchange="loadLabFile(event)">
+      </div>
+      <div id="labControls" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #d5dde7;gap:8px;flex-wrap:wrap;align-items:center;">
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;">Lab log
           <select id="labPreset" style="font-size:12px;max-width:300px;"></select></label>
-        <button class="demoBtn" onclick="loadLabPreset()" title="Load the selected reference lab JSON from PERModel/RefTVA (Auto = pick by the Live tab's Max BW)">🔬 Compare with lab log</button>
         <button class="demoBtn" onclick="document.getElementById('labFile').click()" title="Pick a different JSON file from disk">📂 Browse…</button>
         <button id="labClear" class="demoBtn" style="display:none;" onclick="clearLab()">✕ Clear lab</button>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;" title="Equivalent SNR = lab RSSI(dBm) + this offset. Tune so the sweeps line up.">RSSI→SNR offset (dB)
           <input id="labOffset" type="number" value="62" step="0.5" style="width:62px;" onchange="if(LAB_STEPS)renderStepTable(SCN_RECS,SCN_SEGS)"></label>
         <button id="labAlign" class="demoBtn" style="display:none;" onclick="autoAlignKnee()" title="Set the RSSI→SNR offset by matching per-MCS transitions between simulation and lab (robust median)">🎯 Auto-align (per-MCS)</button>
-        <input id="labFile" type="file" accept=".json,application/json" style="display:none;" onchange="loadLabFile(event)">
-        <span id="labStatus" style="font-size:12px;color:#64748b;"></span>
       </div>
       <div id="labPath" style="margin-top:4px;font-size:11.5px;color:#1f6b45;font-family:Consolas,monospace;word-break:break-all;"></div>
     </div>
@@ -320,6 +374,238 @@
     </div>
   </div>
 </div>
+<!-- ===== end sub-tab 1 ===== -->
+
+<!-- ===== sub-tab: behind the scenes (engine flow) ===== -->
+<div class="exwrap" id="sub-engine" style="display:none;">
+  <div class="excard">
+    <h2>⚙️ How the simulation works behind the scenes</h2>
+    <p>The whole thing is <b>one closed loop</b> running on a <b>virtual clock</b>. Nothing happens
+       simultaneously — it's strictly sequential, single-threaded. It's <b>not</b> frame-by-frame:
+       each pass processes a whole <b>window</b> of frames at once, then jumps the clock forward by
+       that window's airtime. That's what makes it fast.</p>
+
+    <!-- ---- the loop diagram ---- -->
+    <style>
+      #engineFlow{--b:#0071c5;--g:#64748b;--ink:#1e293b;max-width:640px;margin:22px auto;}
+      #engineFlow .node{position:relative;border:2px solid var(--b);border-radius:12px;
+        background:#f5f9ff;padding:12px 16px;margin:0 auto;max-width:520px;text-align:center;
+        box-shadow:0 2px 8px rgba(20,40,80,.06);}
+      #engineFlow .node b{color:var(--b);display:block;font-size:15px;}
+      #engineFlow .node small{color:var(--g);font-size:12px;}
+      #engineFlow .node code{background:#e8f1fb;color:#0b4f86;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+      #engineFlow .arrow{width:2px;height:26px;background:var(--b);margin:6px auto;position:relative;}
+      #engineFlow .arrow:after{content:'▼';position:absolute;bottom:-9px;left:-6px;color:var(--b);font-size:13px;}
+      #engineFlow .loopback{border:2px dashed #c026d3;border-radius:12px;background:#fdf4ff;
+        color:#86198f;padding:9px 14px;max-width:520px;margin:10px auto;text-align:center;font-weight:600;font-size:13px;}
+      #engineFlow .cond{border-color:#16a34a;background:#f0fdf4;}
+      #engineFlow .cond b{color:#15803d;}
+    </style>
+    <div id="engineFlow">
+      <div class="cond node"><b>while ( t &lt; total_ms )</b><small>loop until the scenario's virtual time is used up</small></div>
+      <div class="arrow"></div>
+      <div class="node"><b>1 · Channel</b> — ground truth at time t<br>
+        <small><code>channel.state(t)</code> → SNR, collision, delay-spread</small></div>
+      <div class="arrow"></div>
+      <div class="node"><b>2 · Emulator</b> — transmit a whole window<br>
+        <small><code>simulate_window()</code>: acked = round(N × (1 − PER)) — <b>one calc for N frames</b></small></div>
+      <div class="arrow"></div>
+      <div class="node"><b>3 · TLC</b> — the rate picker decides<br>
+        <small><code>tlc.on_stats(stats, t)</code> → new rate table + next window size (search vs dwell)</small></div>
+      <div class="arrow"></div>
+      <div class="node"><b>4 · Log + advance clock</b><br>
+        <small><code>dt_ms = window × airtime</code>, then <code>t += dt_ms</code> — jump forward by the window</small></div>
+      <div class="loopback">⟲ loop back to step 1 with the new time <code>t</code> and the TLC's new rate table</div>
+    </div>
+
+    <h3>🔁 One calc per window — not once, not per frame</h3>
+    <p>Each turn of the loop does <b>exactly one</b> <code>simulate_window()</code> call (one PER lookup + one multiply).
+       So the number of calcs = the number of <b>windows</b> the scenario is chopped into. There are two window types:</p>
+    <table class="fieldtbl">
+      <tr><th>Window type</th><th>Size</th><th>Calcs</th><th>When</th></tr>
+      <tr><td><b>Dwell</b> (STAY)</td><td><code>DWELL</code> = 2000 frames</td><td><b>1 calc</b></td><td>Steady state — emitted back-to-back while the link holds.</td></tr>
+      <tr><td><b>Search cycle</b></td><td><code>SEARCH</code> = 20 frames <b>per candidate</b></td><td><b>N calcs</b> (one per neighbour tried)</td><td>Periodically, once ~<code>SUCCESS_LIMIT</code> frames pass and the ~300&nbsp;ms search guard clears.</td></tr>
+    </table>
+
+    <h3>📏 Example — a steady scenario (<code>5000, 32</code> = 5&nbsp;s at SNR 32&nbsp;dB)</h3>
+    <p>The channel never changes, but the sim is <b>not</b> a single calc, and <b>not</b> one calc per search cycle either.
+       Here's a real slice of the timeline — <b>2 dwell windows</b> and <b>2 search cycles</b> — read it left to right, top to bottom:</p>
+
+    <style>
+      #tline{max-width:600px;margin:16px auto;}
+      #tline .blk{border-radius:10px;padding:11px 14px;margin:0 auto;max-width:540px;box-shadow:0 2px 8px rgba(20,40,80,.06);}
+      #tline .dwell{border:2px solid #0071c5;background:#f5f9ff;}
+      #tline .sc{border:2px solid #b45309;background:#fffbeb;}
+      #tline .blk .hd{font-weight:800;font-size:14px;margin-bottom:3px;}
+      #tline .dwell .hd{color:#0071c5;} #tline .sc .hd{color:#b45309;}
+      #tline .blk .bd{font-size:12.5px;color:#475569;line-height:1.5;}
+      #tline .blk code{background:#eef2f7;color:#0b4f86;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+      #tline .clock{font-size:11.5px;color:#64748b;text-align:right;margin:2px 8px 0;font-family:Consolas,monospace;}
+      #tline .down{width:2px;height:20px;background:#94a3b8;margin:5px auto;position:relative;}
+      #tline .down:after{content:'▼';position:absolute;bottom:-8px;left:-6px;color:#94a3b8;font-size:12px;}
+    </style>
+    <div id="tline">
+
+      <div class="blk dwell">
+        <div class="hd">① Dwell window — 2000 frames · 1 calc</div>
+        <div class="bd">TLC is happy on its current rate (state <code>STAY</code>). We transmit 2000 frames in one shot:
+          <code>acked = round(2000 × (1 − PER))</code>. Success ratio is high, so the rate is <b>held</b>.
+          It counts these 2000 successes toward the search trigger.</div>
+      </div>
+      <div class="clock">clock: t = 0 → ~400 ms &nbsp;(dt = 2000 × airtime)</div>
+      <div class="down"></div>
+
+      <div class="blk dwell">
+        <div class="hd">② Dwell window — 2000 frames · 1 calc</div>
+        <div class="bd">Same story, another 2000-frame calc. But now the running success counter has crossed
+          <code>SUCCESS_LIMIT</code> <b>and</b> the ~300&nbsp;ms search guard has elapsed → TLC decides:
+          "link looks great, let me test if an even faster rate works." It arms a <b>search cycle</b>.</div>
+      </div>
+      <div class="clock">clock: ~400 → ~800 ms</div>
+      <div class="down"></div>
+
+      <div class="blk sc">
+        <div class="hd">③ Search cycle #1 — 3 candidates × 20 frames · 3 calcs</div>
+        <div class="bd">TLC builds a short list of neighbour rates (e.g. higher MCS / wider BW). Each candidate gets a
+          tiny <b>20-frame probe</b> = one calc each. It scores their throughput, keeps the <b>best</b>, then
+          settles back to <code>STAY</code> on the winner. Because probes are only 20 frames, this whole cycle
+          costs almost no airtime (~a few ms).</div>
+      </div>
+      <div class="clock">clock: ~800 → ~805 ms &nbsp;(3 × 20 frames)</div>
+      <div class="down"></div>
+
+      <div class="blk dwell">
+        <div class="hd">…back to dwell windows for a while…</div>
+        <div class="bd">The winning rate is now held with 2000-frame dwell calcs again, until the success counter
+          + guard timer trip the next search.</div>
+      </div>
+      <div class="down"></div>
+
+      <div class="blk sc">
+        <div class="hd">④ Search cycle #2 — 3 candidates × 20 frames · 3 calcs</div>
+        <div class="bd">Same as ③, just later in time. Since SNR is steady at 32&nbsp;dB, the search usually re-confirms the
+          <b>same</b> rate (no better neighbour) and settles right back — a cheap "is anything better yet?" check
+          that repeats periodically for the whole scenario.</div>
+      </div>
+      <div class="clock">clock: (some hundreds of ms later)</div>
+
+    </div>
+
+    <p style="margin-top:10px;">So across the full 5&nbsp;s: mostly <b>dwell calcs</b> (one big 2000-frame window each, ~400 ms of virtual time)
+       with short <b>search cycles</b> (3 tiny calcs each) sprinkled in — on the order of <b>~15–30 calcs total</b>,
+       not thousands of per-frame simulations. That's the speed.</p>
+
+    <h3>🏎️ Why it's so fast</h3>
+    <div class="cardgrid">
+      <div class="icard"><div class="ic">📦</div><h4>Windows, not frames</h4>
+        <p>A 2000-frame window collapses into a single multiply: <code>N × (1 − PER)</code>. No per-frame loop (unless Monte-Carlo mode is on).</p></div>
+      <div class="icard"><div class="ic">📖</div><h4>PER from a lookup table</h4>
+        <p>Frame-error rate is read from measured LUTs (<code>per_lut.js</code>), not computed from physics at run time.</p></div>
+      <div class="icard"><div class="ic">⏱️</div><h4>Virtual clock</h4>
+        <p>Time <code>t</code> only exists as a number that jumps by <code>dt_ms</code>. No real waiting — thousands of ms simulate instantly.</p></div>
+    </div>
+
+    <h3>🧠 Simultaneous or tick-by-tick?</h3>
+    <table class="fieldtbl">
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>Is anything simultaneous?</td><td><b>No.</b> One sequential loop, single-threaded.</td></tr>
+      <tr><td>Tick after tick?</td><td>Not per frame — it steps <b>window by window</b> (tens–thousands of frames per step).</td></tr>
+      <tr><td>What drives it forward?</td><td>A <b>virtual clock</b> <code>t</code> that jumps by each window's airtime <code>dt_ms</code>.</td></tr>
+    </table>
+  </div>
+</div>
+<!-- ===== end behind-the-scenes ===== -->
+
+<!-- ===== sub-tab 2: how to configure ===== -->
+<div class="exwrap" id="sub-guide" style="display:none;">
+  <div class="excard">
+    <h2>⚙️ How to set up a scenario</h2>
+    <p>A “scenario” is just a <b>list of channel conditions over time</b>. You describe how good/bad the link is, second by second, and the simulation plays the firmware’s rate picker through it. Here is the whole recipe:</p>
+    <ol class="steps">
+      <li><b>Pick your radio settings first (Live decision tab).</b> The scenario reuses the <b>Band</b>, <b>Max BW</b>, <b>Antennas</b> and <b>PSD/power</b> chosen on the <b>🎛 Live decision</b> tab. Set those to the device you want to model, then come back here.</li>
+      <li><b>Choose a preset or write your own.</b> Use the preset buttons for common shapes (a steady level, a slow fade, a cliff…), or type lines yourself in the big text box.</li>
+      <li><b>Write one line per segment.</b> Each line is one stretch of time with its channel quality. Format:
+        <br><code>ms, SNR[, SNR_end[, collision[, profile]]]</code></li>
+      <li><b>Run it.</b> Press <b>▶ Run scenario</b>. The charts on the right show what rate TLC chose, the throughput it got, and how it compares to the best possible (“genie”).</li>
+      <li><b>(Optional) compare with a real lab log.</b> Load a reference JSON to overlay measured hardware results and check the model against reality.</li>
+    </ol>
+
+    <h3>📝 What each field on a line means</h3>
+    <table class="fieldtbl">
+      <tr><th>Field</th><th>Required?</th><th>What it does</th></tr>
+      <tr><td><code>ms</code></td><td>Yes</td><td>How long this segment lasts, in <b>milliseconds</b>. e.g. <code>1000</code> = 1 second.</td></tr>
+      <tr><td><code>SNR</code></td><td>Yes</td><td>Channel quality in <b>dB</b> — higher = cleaner signal = faster rates. Low SNR forces TLC down to slow, robust rates.</td></tr>
+      <tr><td><code>SNR_end</code></td><td>Optional</td><td>Give a second value to make the SNR <b>ramp smoothly</b> from <code>SNR</code> to <code>SNR_end</code> across the segment (simulates walking away / fading).</td></tr>
+      <tr><td><code>collision</code></td><td>Optional</td><td>Fraction <b>0–1</b> of airtime lost to other traffic/interference. <code>0.2</code> = 20% of frames collide.</td></tr>
+      <tr><td><code>profile</code></td><td>Optional</td><td>The multipath environment: <code>awgn</code>, <code>small room</code>, <code>office</code>, <code>outdoor</code> (or a delay-spread τ in µs). Omit to use the Live tab’s Channel profile.</td></tr>
+    </table>
+
+    <div class="callout">
+      <b>Rule of thumb:</b> you only ever need the first two fields (<code>ms, SNR</code>). Add the extras only when you want to model a fade (<code>SNR_end</code>), a busy channel (<code>collision</code>), or a specific room type (<code>profile</code>).
+    </div>
+
+    <h3>🔎 Worked examples</h3>
+    <div class="cardgrid">
+      <div class="icard"><div class="ic">📏</div><h4>Steady link</h4><p><code>2000, 30</code><br>Hold SNR = 30 dB for 2 seconds. Good for seeing the stable rate at one quality level.</p></div>
+      <div class="icard"><div class="ic">📉</div><h4>Walking away (fade)</h4><p><code>4000, 40, 5</code><br>Ramp from 40 dB down to 5 dB over 4 s — watch TLC step down through the rates.</p></div>
+      <div class="icard"><div class="ic">🚦</div><h4>Busy channel</h4><p><code>2000, 25, 25, 0.3</code><br>25 dB but 30% collisions — shows how interference, not signal, can cap throughput.</p></div>
+      <div class="icard"><div class="ic">🏢</div><h4>Office multipath</h4><p><code>2000, 28, 28, 0, office</code><br>Same SNR, harsher echoes — favours a longer guard interval.</p></div>
+    </div>
+
+    <div class="callout">
+      <b>Tip:</b> stack many short lines to build a story — e.g. a strong start, a dip when a wall gets in the way, then recovery. Each line simply continues where the previous one ended.
+    </div>
+  </div>
+</div>
+<!-- ===== end sub-tab 2 ===== -->
+
+<!-- ===== sub-tab 3: what is this (for dummies) ===== -->
+<div class="exwrap" id="sub-about" style="display:none;">
+  <div class="excard">
+    <h2>💡 What is this simulation, in plain words?</h2>
+    <p>Your WiFi chip constantly has to answer one question: <b>“how fast can I send data right now without it getting lost?”</b> Send too fast and frames fail and have to be resent (slower overall). Send too slow and you waste a good connection. The firmware component that makes this call is the <b>TLC — the rate picker.</b> This page lets you watch it think.</p>
+
+    <div class="analogy">
+      <b>Think of driving a car.</b> The SNR is how clear the road is. When the road is clear (high SNR) you can floor it (fast rate). When it gets foggy (low SNR) you slow down so you don’t crash (frames don’t get lost). TLC is the driver constantly adjusting speed to conditions — and this simulation is a dashcam replay of that driving.
+    </div>
+
+    <h3>🎯 What the simulation actually does</h3>
+    <div class="cardgrid">
+      <div class="icard"><div class="ic">🌦️</div><h4>You set the weather</h4><p>You describe the channel over time (the SNR line, plus optional collisions & room type). That’s the “road conditions”.</p></div>
+      <div class="icard"><div class="ic">🧠</div><h4>TLC decides</h4><p>The real firmware logic (ported faithfully) picks a rate: how many bits per symbol (MCS), channel width, antennas, guard interval.</p></div>
+      <div class="icard"><div class="ic">📊</div><h4>You see the result</h4><p>Charts show the chosen rate, the throughput achieved, and the “genie” — the best a perfect oracle could have done.</p></div>
+    </div>
+
+    <h3>🧩 The words you’ll see, decoded</h3>
+    <table class="fieldtbl">
+      <tr><th>Term</th><th>In plain words</th></tr>
+      <tr><td><b>SNR (dB)</b></td><td>How clean the signal is. Big number = clear line, small number = noisy/weak.</td></tr>
+      <tr><td><b>Rate / MCS</b></td><td>How much data is packed into each transmission. Higher = faster but needs a cleaner channel.</td></tr>
+      <tr><td><b>Success Ratio</b></td><td>The share of frames that arrive OK. TLC’s real goal: keep the fastest rate that still gets frames through.</td></tr>
+      <tr><td><b>SEARCH</b></td><td>TLC “test-driving” a nearby faster setting to see if the channel improved. If it wins, it switches; if not, it reverts.</td></tr>
+      <tr><td><b>Genie</b></td><td>An imaginary perfect picker that always knows the ideal rate. It’s the score to beat — TLC can’t see the future, the genie can.</td></tr>
+      <tr><td><b>Retry table</b></td><td>Plan B, C, D… if a frame fails, it’s resent at a slower, safer rate so the data still gets there.</td></tr>
+    </table>
+
+    <div class="callout">
+      <b>Why it matters:</b> a good rate picker means your video call doesn’t freeze and your download stays fast even as you move around. This tool lets engineers <b>see and test that decision-making</b> without needing real hardware and a lab.
+    </div>
+
+    <h3>🚀 Try this first</h3>
+    <ol class="steps">
+      <li>Go to the <b>⚙️ How to configure</b> sub-tab and load a preset (or keep the default fade).</li>
+      <li>Come back to <b>📈 Simulation</b> and press <b>▶ Run scenario</b>.</li>
+      <li>Watch the blue line (TLC’s choice) chase the purple line (the genie’s ideal) as the grey SNR line drops. The closer they stay, the smarter the picker.</li>
+    </ol>
+  </div>
+</div>
+<!-- ===== end sub-tab 3 ===== -->
+
+</div><!-- simcontent -->
+</div><!-- simlayout -->
+
+</div>
+<!-- ===== end Simulation tab ===== -->
 
 <div id="tab-improve" style="display:none;width:100%;padding:0;margin:0;">
   <iframe id="impFrame" title="TLC Simulation — Improvement Ideas" style="width:100%;height:calc(100vh - 160px);border:0;display:block;"></iframe>
@@ -720,6 +1006,14 @@ function showTab(which){
   if(which==='doc'){ const f=document.getElementById('docFrame'); if(!f.src) f.src='tlc_sim_architecture.html'; window.scrollTo(0,0); requestAnimationFrame(sizeDocFrame); }
   if(which==='improve'){ const f=document.getElementById('impFrame'); if(!f.src) f.src='tlc_sim_improvements.html'; window.scrollTo(0,0); requestAnimationFrame(sizeImpFrame); }
 }
+function showSub(which){
+  document.getElementById('sub-sim').style.display    = which==='sim'   ?'':'none';
+  document.getElementById('sub-engine').style.display = which==='engine'?'':'none';
+  document.getElementById('sub-guide').style.display  = which==='guide' ?'':'none';
+  document.getElementById('sub-about').style.display  = which==='about' ?'':'none';
+  document.querySelectorAll('#simpoc a').forEach(b=>b.classList.toggle('active', b.dataset.sub===which));
+  window.scrollTo(0,0);
+}
 window.addEventListener('resize',()=>{ if(document.getElementById('tab-doc').style.display!=='none') sizeDocFrame(); if(document.getElementById('tab-improve').style.display!=='none') sizeImpFrame(); });
 const SCN_PRESETS={
   'steady':'5000, 32, -, 0.05',
@@ -977,6 +1271,7 @@ function loadLabFile(ev){
       LAB_STEPS=parsed; LAB_SRC=f.name; LAB_MODE='user'; st.textContent=f.name+' \u2014 '+parsed.length+' steps loaded';
       document.getElementById('labClear').style.display='';
       document.getElementById('labAlign').style.display='';
+      const lc=document.getElementById('labControls'); if(lc) lc.style.display='flex';
       const lp=document.getElementById('labPath'); if(lp) lp.textContent='Lab log: '+f.name+'  (local file \u2014 browser does not expose the full path)';
       autoAlignKnee(true);   // auto-align on load using the MCS knee
       renderStepTable(SCN_RECS,SCN_SEGS);
@@ -999,6 +1294,7 @@ function defaultLabFileForBw(){ return REF_TVA_BY_BW[+((bw_||{}).value)] || REF_
 (function(){ const sel=document.getElementById('labPreset'); if(!sel) return;
   sel.innerHTML='<option value="">Auto \u2014 by Max BW</option>'+REF_TVA_FILES.map(f=>'<option value="'+f+'">'+f+'</option>').join(''); })();
 async function loadLabPreset(){
+  const lc=document.getElementById('labControls'); if(lc) lc.style.display='flex';   // reveal refine options inline
   const sel=document.getElementById('labPreset'); let fname=(sel&&sel.value)||defaultLabFileForBw();
   const rel=REF_TVA_DIR+fname, full=new URL(rel,location.href).href;
   const st=document.getElementById('labStatus'), lp=document.getElementById('labPath');
@@ -1025,6 +1321,7 @@ async function loadLabPreset(){
 }
 function clearLab(){ LAB_STEPS=null; LAB_SRC=''; LAB_MODE='cleared'; document.getElementById('labClear').style.display='none';
   document.getElementById('labAlign').style.display='none';
+  const lc=document.getElementById('labControls'); if(lc) lc.style.display='none';
   document.getElementById('labStatus').textContent=''; const lp=document.getElementById('labPath'); if(lp) lp.textContent='';
   renderStepTable(SCN_RECS,SCN_SEGS); }
 // Load the bundled RefTVA default for the current Max BW (no fetch needed; works on file://).
