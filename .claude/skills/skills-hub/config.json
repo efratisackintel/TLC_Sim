@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "name": "skills-hub",
+    "version": "1.0.6",
+    "author": "Udi Apsel",
+    "email": "udi.apsel@intel.com"
+  },
+  "general": {
+    "destRoot": ".claude/skills",
+    "agentProxyDir": ".github/agents"
+  },
+  "srcRoot": {
+    "windows": "https://github.com/intel-sandbox/wcs-skills-hub/skills",
+    "linux": "/mnt/share/ChAI_Skills"
+  },
+  "activeEnvironment": "miniPython",
+  "environments": {
+    "none": {
+      "type": "none"
+    },
+    "miniPython": {
+      "type": "sourced",
+      "archiveFile": {
+        "windows": "https://github.com/intel-sandbox/wcs-skills-hub/skills/MiniPython.zip",
+        "linux": "/mnt/share/ChAI_Skills/MiniPython.tar.gz"
+      },
+      "dest": {
+        "windows": "c:\\MiniPython",
+        "linux": "~/MiniPython"
+      },
+      "useSudo": {
+        "linux": false
+      }
+    },
+    "venv": {
+      "type": "venv",
+      "pythonExecutable": {
+        "windows": "python",
+        "linux": "python3"
+      },
+      "path": {
+        "windows": "~\\.venv",
+        "linux": "~/.venv"
+      }
+    },
+    "venv2": {
+      "type": "venv",
+      "pythonExecutable": {
+        "windows": "python",
+        "linux": "python3"
+      },
+      "path": {
+        "windows": "~\\.venv2",
+        "linux": "~/.venv2"
+      }
+    }
+  },
+  "proxy": {
+    "http": "http://proxy-dmz.intel.com:912",
+    "https": "http://proxy-dmz.intel.com:912"
+  }
+}

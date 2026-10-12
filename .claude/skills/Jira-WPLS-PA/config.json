@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "name": "Jira-WPLS-PA",
+    "version": "1.0.0",
+    "description": "Jira WPLS Program Automation — fetch, search, comment, transition, update, and duplicate issue hierarchies",
+    "author": "Dana Meir, Vered Walter",
+    "envVars": [
+      { "name": "JIRA_URL", "description": "Jira server base URL (e.g. https://jira.company.com)", "required": true },
+      { "name": "JIRA_PAT_TOKEN", "description": "Jira Personal Access Token for authentication", "required": true }
+    ]
+  },
+  "activeEnvironment": "miniPython"
+}

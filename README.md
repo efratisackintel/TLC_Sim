@@ -1,5 +1,12 @@
 # TLC_Sim — WiFi Firmware TLC (Rate‑Scale) Simulation
 
+## TLC Expert Agent
+
+This workspace includes a read-only VS Code **TLC Expert** agent for analyzing
+Rate Scale Manager behavior, firmware-versus-simulator differences, PER/SR
+curves, and TVA results. See [TLC Expert Usage](../Agents/TLC%20Expert%20Usage.md)
+for prompt examples and analysis hints.
+
 A small, self‑contained Python simulation of the WiFi firmware **Transmit‑Link‑Control (TLC / rate‑scaling)** algorithm, plus a **data‑driven PER model** built from measured EHT PER‑vs‑SNR curves and interactive teaching docs.
 
 The rate picker is chosen to maximize **effective throughput = peak_rate × Success‑Ratio**, exactly like the real Rate‑Scale Manager, and the PER model that feeds it comes entirely from measured firmware curves (no analytic sigmoid).

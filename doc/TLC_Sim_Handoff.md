@@ -2,7 +2,7 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-08-27.
+> Last updated: 2026-09-14.
 
 ---
 
@@ -14,7 +14,7 @@
 > First, read `doc/TLC_Sim_Handoff.md` end-to-end to load full context — it's the up-to-date
 > restart doc (project overview, the tlcsim/ B1–B6 engine, the browser playground, FW facts,
 > and this project's history incl. delay-spread profiles, the FW-faithful retry table §3.5,
-> and the collision/SR analysis §11).
+> the collision/SR analysis §11, and the 2026-09 UI restructure + genie/lab & scale-action notes §12).
 >
 > Key things to keep in mind:
 > - TWO engines that must stay in sync: the Python package `tlcsim/` (the real engine, run via
@@ -307,7 +307,41 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 
 ---
 
-## 12. Transcript pointer
+## 12. Session 2026-09-09 → 09-14 — UI restructure + genie/lab & scale-action insights
+
+### 12.1 Playground UI changes (`doc/tlc_playground.html`, JS-only teaching artifact)
+- **Simulation tab now has a left POC sidebar** (`#simpoc`), mirroring the Architecture tab. The old horizontal sub-tab bar at the top was **removed**. Four sub-sections switch via `showSub(which)`: `sim` (📈 Simulation — charts & run), `engine` (⚙️ Behind the scenes), `guide` (⚙️ How to configure — scenario/preset syntax), `about` (💡 What is this? — for-dummies). `showSub()` toggles `#simpoc a.active`; content wrapped in `.simlayout` (flex) + `.simcontent`. Sidebar auto-hides `@media(max-width:820px)`.
+- **TVA per-step log toolbar decluttered**: only **📥 Save table → XLSX** and **🔬 Compare with lab log** show by default. The refine controls (Lab log dropdown, 📂 Browse, ✕ Clear lab, RSSI→SNR offset, 🎯 Auto-align) live in a hidden `#labControls` div revealed on Compare (`loadLabPreset()`/`loadLabFile()` set it to flex; `clearLab()` hides it).
+
+### 12.2 Architecture tab changes (`doc/tlc_sim_architecture.html`)
+- **`#poc` converted from `position:fixed` → sticky left sidebar** inside a `.layout` flex (`.wrap` = flex:1). It used to vanish under 1460px; breakpoint lowered to 820px so it stays visible on normal screens.
+- **New B4-only card `card_expectedTpt`** — the firmware `expectedTptHe` throughput tables (GI 0.8µs and 3.2µs; all BW × SISO/MIMO × MCS0-13, in Mbps). Toggled visible only when B4 is active (in `show()` + hidden in `showExtra()`), same pattern as `card_searchTime`/`card_searchCond`.
+
+### 12.3 Combined TVA workbook
+- **`PERModel/build_tva_combined.py`** (new) generates **one** `Results/tva_sim_vs_lab_ALL.xlsx` with, per BW (20/40/80/160/320): sheets `TVA <bw>MHz`, `Charts <bw>MHz` (5 line charts), hidden `Data <bw>MHz`, plus one shared `RSSI to SNR`. It **imports helpers from `build_tva_compare`** (`run_bw`, `EXP_TPT_HE`, styling) and regenerates from source — so it does not read (or get blocked by) the per-BW files if they are open in Excel. Also committed: `Results/TVA V0/` and `TVA V1/` reference sets.
+
+### 12.4 FW `expectedTptHe` — where it lives
+- Table: `expectedTptHe[BW][GI][NSS][MCS]` in `fw/src/umac/main/dataPath/rateScaleMng/rateScaleMng.c` (~L336). Declared `_rateScaleMng.h` (~L879); read via `_rsMngGetExpectedTptTable()` (~L3145). **Stored as Mbps × 10.** Under **UMAC**. The sim's `EXP_TPT_HE` (playground) / `tlcsim/rates.py` mirror it verbatim. Top cell `320·MIMO·0.8µs·MCS13 = 5040 Mbps`.
+
+### 12.5 Genie vs lab throughput gap (esp. 320 MHz) — analysis
+- **They measure different things.** `genie`/`sim tpt = expectedTptHe × SR` (measured-PER-driven, but an **idealized upper bound**). `lab tpt` = real measured throughput, **~7 s averaged**. Matching MCS/BW/NSS/GI ⇒ same **PHY config**, NOT same Mbps.
+- **The model does NOT simulate MAC/aggregation ceilings** (A-MPDU byte cap, Block-ACK, TXOP/PPDU-duration). Those overheads exist only in the real lab number, so lab sits **~10-20% below** genie even at identical rates.
+- **320 MHz shows it most**: absolute Mbps are ~5000, so a ~12% efficiency gap is a huge (~400-900 Mbps) visual separation; the top-rate `expectedTpt` values are the most optimistic; several lab rows have residual SR 92-98% that further cut lab tpt.
+- **README "Lessons learned" confirms**: genie is an idealized upper bound; the ~99% claim is **sim-vs-genie**, and 1 s sim windows vs ~7 s lab averaging explain the low-SNR-tail residuals. SNR 29 row: lab actually beats genie (metrics are independent). SNR 23: extra gap is a real rate mismatch (lab MCS7 vs genie MCS8).
+
+### 12.6 PR can change WITHOUT a search cycle — scale action vs search cycle
+- **Two independent mechanisms move the PR:** (a) **scale action** — in `STAY`, step MCS ±1 **within the current column** every stat window, SR-driven; (b) **search cycle** — in `SEARCH`, explore neighbouring columns (BW/NSS/GI). Only (b) is a numbered SC / orange band.
+- **Sudden-drop trace (preset `1700,40 / 1700,8 / 1600,40`):** between SC6 (ends ~t=1540ms) and SC7 (starts ~t=1878ms) the state stays `STAY`. At t≈1702ms SNR drops 40→8, MCS13 SR→0%, and STAY **force-downscales** 13→12→…→2 (one MCS per window, since SR<`FORCE`=0.15) with **no search**. It parks at MCS2/100% SR, then SC7 fires later once the success counter + ~300 ms guard trip (a SUCCESS-triggered probe-up).
+- **Gotcha:** during that descent the log shows `mode:"search"` but `state:"STAY"` — `mode` is only the **window length** (short 20-frame fast-fail vs 2000-frame dwell), not the SC counter. SC bands come from `state==='SEARCH'` spans.
+- **Code (playground):** STAY scaling ~L1071 in `tlc_playground.html`; constants `C={FORCE:.15, NODEC:.90, PERF:.95, SEARCH:20, DWELL:2000, FAIL:400, SUCC:4500, GUARD:300, UPGUARD:200}`. Maps to FW `SCALE_ACTION` (up/down-scale) vs `SEARCH_CYCLE` (column switch).
+
+### 12.7 Git state
+- Commit **`5f7a104`** (2026-09-09, on `main`, pushed to `origin` = `github.com/efratisackintel/TLC_Sim`): all of 12.1-12.3.
+- **Uncommitted:** `TLC_Sim.code-workspace` adds the `../Agents` folder to the multi-root workspace (3 lines) — not staged.
+
+---
+
+## 13. Transcript pointer
 
 Full uncompacted conversation transcript (for exact snippets/code):
 ```

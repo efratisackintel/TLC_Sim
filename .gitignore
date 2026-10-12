@@ -5,12 +5,23 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Local credentials
+.env
+.env.*
+
+# Scratch dumps (raw Jira exports)
+.claude/.temp/
+
 # Large redundant archive (exceeds GitHub's 100 MB per-file limit;
 # the same data lives unzipped in PERModel/WiFi_EHT_Extended_HVT/)
 PERModel/WiFi_EHT_Extended_HVT.zip
 
 # Raw measured .fig dataset (~135 MB of binary source figures)
 PERModel/WiFi_EHT_Extended_HVT/
+
+# Raw channel-D + BF .fig dataset (binary source figures) and retired/buggy captures
+PERModel/channel D with BF per model/
+PERModel/Old/
 
 # OS / editor cruft
 Thumbs.db

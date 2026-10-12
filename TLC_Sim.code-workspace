@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../FWCode/wifi_drv-dev"
+		},
+		{
+			"path": "../Agents"
 		}
 	],
 	"settings": {}

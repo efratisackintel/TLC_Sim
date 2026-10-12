@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/anthropic/wcs-skills-hub/skills/skills-hub/quickRun.schema.json",
+  "title": "Skills Hub Quick Run Configuration",
+  "description": "Defines quick-run actions for a skill, shown in the Skills Hub tree view. Each action is either a chat prompt (sent to Copilot) or a terminal command (executed directly or via agent chat).",
+  "type": "object",
+  "required": ["actions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to this schema file for editor auto-completion."
+    },
+    "notes": {
+      "type": "array",
+      "description": "Top-level notes shown at the top of the quick-run form, above all action sections. Use for environment requirements, prerequisites, or general warnings that apply to all actions.",
+      "items": {
+        "$ref": "#/definitions/noteObject"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "description": "One or more quick-run actions exposed in the Skills Hub tree.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/action"
+      }
+    }
+  },
+  "definitions": {
+    "action": {
+      "type": "object",
+      "description": "A single quick-run action. Must have either 'promptTemplate' (chat mode) or 'run' with 'command' (terminal mode).",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for this action within the skill. Used internally — not shown to users. Example: \"convert-single\", \"dry-run-validate\"."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable label shown in the quick-run form. Example: \"Convert document to markdown\"."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional longer description shown as a tooltip or subtitle in the form."
+        },
+        "promptTemplate": {
+          "type": "string",
+          "description": "Chat-mode prompt template. Use {placeholders} for input values. Optional segments can be wrapped in [ ... ] and are included only when all placeholders inside are non-empty (example: \"search wiki for {query} [in space {space}]\"). Required when no 'run' block is present."
+        },
+        "run": {
+          "$ref": "#/definitions/runConfig"
+        },
+        "notes": {
+          "type": "array",
+          "description": "Action-specific notes shown within this action's section, between description and input fields.",
+          "items": {
+            "$ref": "#/definitions/noteObject"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "description": "Input fields shown in the quick-run form. Each input's 'key' can be referenced as {key} in templates.",
+          "items": {
+            "$ref": "#/definitions/input"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["promptTemplate"],
+          "properties": {
+            "promptTemplate": { "minLength": 1 }
+          }
+        },
+        {
+          "required": ["run"],
+          "properties": {
+            "run": {
+              "required": ["command"]
+            }
+          }
+        }
+      ]
+    },
+    "runConfig": {
+      "type": "object",
+      "description": "Terminal execution configuration. When present, the action runs as a terminal command instead of a chat prompt.",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["terminal"],
+          "default": "terminal",
+          "description": "Execution type. Currently only 'terminal' is supported."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The executable to run. Supports {placeholders} and optional [ ... ] segments. Use the built-in '{pythonExecutable}' for Python scripts."
+        },
+        "argsTemplate": {
+          "type": "array",
+          "description": "Command arguments as an array of strings. Each element supports {placeholders} and optional [ ... ] segments. Example: [\"convert.py\", \"[--input {inputPath}]\"].",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "default": "{skillPath}",
+          "description": "Working directory for the command. Supports {placeholders} and optional [ ... ] segments. Defaults to '{skillPath}' if omitted."
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "description": "A single input field in the quick-run form.",
+      "required": ["key", "prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique key for this input. Referenced as {key} in templates. Example: \"inputPath\", \"docType\"."
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Label text shown next to the input field. Example: \"Input file path\", \"Document type\"."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["text", "multiline", "choice", "file", "folder", "fileOrFolder", "path"],
+          "default": "text",
+          "description": "Input field type. 'text' = single-line text, 'multiline' = multi-line textarea, 'choice' = dropdown select, 'file'/'folder' = path with native picker, 'fileOrFolder' = path with picker that allows selecting either, 'path' = path with configurable picker."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the user must fill in this field before running."
+        },
+        "readonly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the field is read-only (non-editable, browse button hidden for path inputs)."
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "Placeholder text shown in the empty input field. Example: \"C:\\\\work\\\\spec.docx\"."
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value pre-filled in the input field."
+        },
+        "choices": {
+          "type": "array",
+          "description": "Options for 'choice' type inputs. Can be plain strings or {label, value} objects.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/definitions/choiceObject"
+              }
+            ]
+          }
+        },
+        "chooser": {
+          "type": "string",
+          "enum": ["file", "folder", "fileOrFolder"],
+          "description": "For 'path' type: what kind of native picker to show."
+        },
+        "chooserMode": {
+          "type": "string",
+          "enum": ["open", "save"],
+          "default": "open",
+          "description": "For 'path' type: whether the picker is for opening or saving."
+        },
+        "multiple": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to allow selecting multiple files/folders (for 'file', 'folder', 'fileOrFolder', and 'path' types with a browse picker)."
+        },
+        "filters": {
+          "type": "object",
+          "description": "File type filters for the native picker dialog. Keys are filter labels, values are arrays of extensions (without dots). Example: {\"PDF Files\": [\"pdf\"], \"All Files\": [\"*\"]}.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "choiceObject": {
+      "type": "object",
+      "description": "A choice entry with separate display label and submitted value.",
+      "required": ["label", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Text shown in the dropdown."
+        },
+        "value": {
+          "type": "string",
+          "description": "Value submitted when this choice is selected."
+        }
+      }
+    },
+    "noteObject": {
+      "type": "object",
+      "description": "A styled note displayed in the quick-run form. Used for environment requirements, warnings, or tips.",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The note message to display."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["info", "warning", "tip"],
+          "default": "info",
+          "description": "Visual style of the note. 'info' = neutral/blue, 'warning' = yellow/amber, 'tip' = green/subtle."
+        }
+      }
+    }
+  }
+}

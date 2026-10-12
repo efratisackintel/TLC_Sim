@@ -1,0 +1,205 @@
+{
+  "$schema": "../skills-hub/quickRun.schema.json",
+  "actions": [
+    {
+      "id": "fetch-issue",
+      "label": "Fetch issue",
+      "description": "Retrieve a single Jira issue by key and display as JSON",
+      "inputs": [
+        {
+          "key": "issueKey",
+          "prompt": "Issue key",
+          "required": true,
+          "placeholder": "PLC-978"
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": ["jira_wpls_pa.py", "fetch", "{issueKey}"],
+        "cwd": "{skillPath}"
+      }
+    },
+    {
+      "id": "search-issues",
+      "label": "Search issues (JQL)",
+      "description": "Search Jira issues using a JQL query",
+      "inputs": [
+        {
+          "key": "jql",
+          "prompt": "JQL query",
+          "required": true,
+          "placeholder": "project = PLC AND status = Open"
+        },
+        {
+          "key": "maxResults",
+          "prompt": "Max results",
+          "default": "50",
+          "placeholder": "50"
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": ["jira_wpls_pa.py", "search", "{jql}", "--max-results", "{maxResults}"],
+        "cwd": "{skillPath}"
+      }
+    },
+    {
+      "id": "add-comment",
+      "label": "Add comment",
+      "description": "Add a comment to a Jira issue",
+      "inputs": [
+        {
+          "key": "issueKey",
+          "prompt": "Issue key",
+          "required": true,
+          "placeholder": "PLC-978"
+        },
+        {
+          "key": "commentBody",
+          "prompt": "Comment text",
+          "type": "multiline",
+          "required": true,
+          "placeholder": "Updated status per review meeting..."
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": ["jira_wpls_pa.py", "comment", "{issueKey}", "{commentBody}"],
+        "cwd": "{skillPath}"
+      }
+    },
+    {
+      "id": "transition-issue",
+      "label": "Transition issue",
+      "description": "Move an issue to a new status",
+      "inputs": [
+        {
+          "key": "issueKey",
+          "prompt": "Issue key",
+          "required": true,
+          "placeholder": "PLC-978"
+        },
+        {
+          "key": "status",
+          "prompt": "Target status",
+          "required": true,
+          "placeholder": "In Progress"
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": ["jira_wpls_pa.py", "transition", "{issueKey}", "{status}"],
+        "cwd": "{skillPath}"
+      }
+    },
+    {
+      "id": "update-issue",
+      "label": "Update issue from JSON",
+      "description": "Update Jira issue fields from a JSON file",
+      "inputs": [
+        {
+          "key": "issueKey",
+          "prompt": "Issue key",
+          "required": true,
+          "placeholder": "PLC-978"
+        },
+        {
+          "key": "jsonFile",
+          "prompt": "JSON file with field updates",
+          "type": "path",
+          "chooser": "file",
+          "chooserMode": "open",
+          "required": true,
+          "placeholder": "C:\\work\\updates.json"
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": ["jira_wpls_pa.py", "update", "{issueKey}", "{jsonFile}"],
+        "cwd": "{skillPath}"
+      }
+    },
+    {
+      "id": "duplicate-hierarchy",
+      "label": "Duplicate issue hierarchy",
+      "description": "Clone parent issues, their children, and grandchildren with label/field overrides",
+      "inputs": [
+        {
+          "key": "jql",
+          "prompt": "JQL to find parent issues",
+          "required": true,
+          "placeholder": "key in (PLC-978)"
+        },
+        {
+          "key": "newLabel",
+          "prompt": "New label to add",
+          "required": true,
+          "placeholder": "WhP_Program_Checklist"
+        },
+        {
+          "key": "removeLabel",
+          "prompt": "Label to remove (leave empty to skip)",
+          "placeholder": "Program_Checklist"
+        },
+        {
+          "key": "programField",
+          "prompt": "Program custom field ID (leave empty to skip)",
+          "placeholder": "customfield_23600"
+        },
+        {
+          "key": "programValue",
+          "prompt": "Program value (JSON)",
+          "placeholder": "{\"value\":\"2025\"}"
+        },
+        {
+          "key": "siliconField",
+          "prompt": "Silicon custom field ID (leave empty to skip)",
+          "placeholder": "customfield_10238"
+        },
+        {
+          "key": "siliconValue",
+          "prompt": "Silicon value (JSON)",
+          "placeholder": "[{\"value\":\"Whale Peak 2\"}]"
+        },
+        {
+          "key": "reporter",
+          "prompt": "Reporter username (leave empty to skip)",
+          "placeholder": "omelnik"
+        },
+        {
+          "key": "project",
+          "prompt": "Override target project key (leave empty to keep original)",
+          "placeholder": "PLC"
+        },
+        {
+          "key": "linkType",
+          "prompt": "Link type name (leave empty for default)",
+          "default": "Inclussion",
+          "placeholder": "Inclussion"
+        }
+      ],
+      "run": {
+        "type": "terminal",
+        "command": "{pythonExecutable}",
+        "argsTemplate": [
+          "jira_wpls_pa.py", "duplicate", "{jql}",
+          "--new-label", "{newLabel}",
+          "[--remove-label {removeLabel}]",
+          "[--project {project}]",
+          "[--link-type {linkType}]",
+          "[--program-field {programField}]",
+          "[--program-value {programValue}]",
+          "[--silicon-field {siliconField}]",
+          "[--silicon-value {siliconValue}]",
+          "[--reporter {reporter}]"
+        ],
+        "cwd": "{skillPath}"
+      }
+    }
+  ]
+}
