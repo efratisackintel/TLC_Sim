@@ -6,7 +6,7 @@ linear ramp if `snr_end` is given.
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 SNR_MIN, SNR_MAX = -20.0, 60.0
 
@@ -19,6 +19,22 @@ class ChannelState:
     snr_db: float           # link SNR in dB (higher = cleaner link)
     collision: float        # 0..1 (probability a TX is lost to collision/interference)
     delay_spread_us: float = 0.0  # RMS delay spread (us); 0 = AWGN / no multipath
+    obss: Optional[Dict[int, float]] = None  # {bw: P} — A-MPDU at >= bw MHz wiped (bursty, e.g. OBSS on the upper 160)
+    mimo_db: float = 0.0    # extra SNR loss for MIMO the AWGN curves miss (fitted from a trace)
+    lgi_db: float = 0.0     # extra SNR loss for long GI (1.6/3.2 us) the AWGN curves miss
+    quiet: Optional[Dict[int, List[float]]] = None  # {bw: [t_ms..]} scripted wider-BW trap opportunities (see busy_at)
+    quiet_gap_ms: float = 5.0
+
+    def loss(self, bw: int) -> float:
+        """Whole-transmission loss probability at `bw`: collision combined with every obss[k], k <= bw."""
+        ok = 1.0 - self.collision
+        for k, p in (self.obss or {}).items():
+            if bw >= k:
+                ok *= 1.0 - p
+        for k in (self.quiet or {}):
+            if bw >= k and k not in (self.obss or {}):
+                ok = 0.0
+        return 1.0 - ok
 
 
 @dataclass
@@ -26,13 +42,20 @@ class Seg:
     """One scenario segment. Constant `snr_db`, or a linear ramp to `snr_end`.
 
     Delay spread is a channel property (constant over the segment). Give it directly
-    via `delay_spread_us`, or by name via `profile` (see PROFILES)."""
+    via `delay_spread_us`, or by name via `profile` (see PROFILES). `obss` = {bw: P} adds
+    bursty whole-A-MPDU loss on the wider channels only (playground token `obss320=P`).
+    `quiet` = {bw: [t_ms, ..]} scripts the trap opportunities (playground `quiet320=t1/t2`, `gap=ms`)."""
     ms: float
     snr_db: float
     snr_end: Optional[float] = None
     collision: float = 0.0
     delay_spread_us: float = 0.0
     profile: Optional[str] = None
+    obss: Optional[Dict[int, float]] = None
+    mimo_db: float = 0.0
+    lgi_db: float = 0.0
+    quiet: Optional[Dict[int, List[float]]] = None
+    quiet_gap_ms: float = 5.0
 
     def __post_init__(self):
         if self.profile is not None:
@@ -63,8 +86,9 @@ class Channel:
             if t < acc + s.ms:
                 frac = (t - acc) / s.ms if s.ms else 0.0
                 v = s.snr_db if s.snr_end is None else s.snr_db + (s.snr_end - s.snr_db) * frac
-                return ChannelState(max(SNR_MIN, min(SNR_MAX, v)), s.collision, s.delay_spread_us)
+                return ChannelState(max(SNR_MIN, min(SNR_MAX, v)), s.collision, s.delay_spread_us, s.obss,
+                                    s.mimo_db, s.lgi_db, s.quiet, s.quiet_gap_ms)
             acc += s.ms
         s = self.segments[-1]
         return ChannelState(s.snr_end if s.snr_end is not None else s.snr_db,
-                            s.collision, s.delay_spread_us)
+                            s.collision, s.delay_spread_us, s.obss, s.mimo_db, s.lgi_db, s.quiet, s.quiet_gap_ms)

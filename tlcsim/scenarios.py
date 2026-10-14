@@ -31,9 +31,17 @@ def interference_burst(snr_db: float = 35, burst_collision: float = 0.4,
                     Seg(ms, snr_db, collision=0.02)])
 
 
+def wide_bw_trap(snr_db: float = 1.5, obss320: float = 0.79, ms: float = 13300) -> Channel:
+    """Weak 160 MHz link + bursty loss on the upper 160 (fitted to ZoharBadLog.sysmon).
+    Reproduces the 320 MHz trap with run_sim(..., mc_ppdu=True) and ReferenceTLC(fw=True)."""
+    return Channel([Seg(ms, snr_db, collision=0.01, profile="awgn", obss={320: obss320},
+                        mimo_db=2.0, lgi_db=0.5)])
+
+
 SCENARIOS = {
     "steady": steady,
     "fade_and_recover": fade_and_recover,
     "sudden_drop": sudden_drop,
     "interference_burst": interference_burst,
+    "wide_bw_trap": wide_bw_trap,
 }

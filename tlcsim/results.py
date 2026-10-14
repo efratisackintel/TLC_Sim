@@ -25,6 +25,7 @@ class Record:
 @dataclass
 class RunResult:
     records: List[Record] = field(default_factory=list)
+    events: List[dict] = field(default_factory=list)   # TLC search-cycle log (ReferenceTLC.sc_log)
 
     def to_csv(self, path: str) -> None:
         with open(path, "w", newline="") as f:

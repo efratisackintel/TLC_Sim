@@ -98,15 +98,21 @@ def isi_penalty(gi_us: float, tau_us: float) -> Tuple[float, float]:
     return snr_pen, floor
 
 
-def per(rate: Rate, ch: ChannelState) -> float:
-    """Probability a transmission at `rate` fails on channel `ch` (0..1). Data-driven
-    AWGN PER + synthetic delay-spread ISI penalty + collision."""
+def phy_fail(rate: Rate, ch: ChannelState) -> float:
+    """Per-MPDU PHY failure on `ch`: measured AWGN PER + synthetic ISI, NO collision/obss."""
     tau = getattr(ch, "delay_spread_us", 0.0)
     snr_pen, floor = isi_penalty(_gi_us(rate), tau) if tau > 0.0 else (0.0, 0.0)
+    snr_pen += (getattr(ch, "mimo_db", 0.0) if rate.nss >= 2 else 0.0) + (0.0 if rate.gi08 else getattr(ch, "lgi_db", 0.0))
     p = phy_per(rate, ch.snr_db - snr_pen)
-    if floor > 0.0:
-        p = max(p, floor)
-    p_success = (1.0 - p) * (1.0 - ch.collision)
+    return max(p, floor) if floor > 0.0 else p
+
+
+def per(rate: Rate, ch: ChannelState) -> float:
+    """Probability a transmission at `rate` fails on channel `ch` (0..1). Data-driven
+    AWGN PER + synthetic delay-spread ISI penalty + collision (+ per-BW obss loss)."""
+    p = phy_fail(rate, ch)
+    loss = ch.loss(rate.bw) if hasattr(ch, "loss") else ch.collision
+    p_success = (1.0 - p) * (1.0 - loss)
     return max(0.0, min(1.0, 1.0 - p_success))
 
 

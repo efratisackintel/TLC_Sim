@@ -2,7 +2,7 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-09-14.
+> Last updated: 2026-10-12.
 
 ---
 
@@ -341,7 +341,65 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 
 ---
 
-## 13. Transcript pointer
+## 13. Session 2026-10-12 — real sysmon replay, wide-BW (320) trap, fixes A/B
+
+### 13.1 The real case (`Logs/TLC/ZoharBadLog.sysmon`, Scorpius2-Whp, 6 GHz UHB, uplink, 13.3 s)
+- Link sits at the bottom: **M1·SISO·160** (SR 100%) / **M0·MIMO·160** (81%); M2·160 ≈ 50%. Tpt ≈ 90–130 Mbps.
+- **M0·SISO·320 SR = 17%** (whole A-MPDU losses, BA timeouts) — far worse than the SNR explains → bursty loss on the upper 160 (OBSS / hidden node at the AP).
+- Every SC (~500 ms) tries 160→320. Twice (t≈7.4 s and 9.8 s) the **single 20-MPDU test window passed by luck** (`testTpt >= stableTpt`, rateScaleMng.c ~L4810) → `SWITCH_TO_TEST_COL`; the stable column's stats are cleared (`_rsMngSwitchToSearchCol`), in-column downscale lands on **M0/320** and the SC ends there.
+- At MCS 0 there is no in-column escape; the FAIL-triggered SCs then **start and end at once** because `avoidHigherMcs` is set (prev SR ≥95% → <70%, L5593; `_rsMngSearchBetterCol` returns FALSE, L3932) for `RS_MNG_UPSCALE_IGNORE_HIGHER_MCS` = 1 s → ~1.2 s at ~1–15 Mbps per trap. Recovery = first SC after the timeout, via the M0/160 test (target = measured tpt when SR ≤ 90%).
+- **uSniffer label gotcha:** `startReason` code 3 prints as `flush_time`, but FW enum `RS_MNG_SEARCH_CYCLE_START_REASON_E` value 3 = **FAIL_FRAMES** (2 = FAIL = FLUSH_TIME alias). Code 0 (unlabelled) = SUCCESS_TIME.
+- TX_RATE_SCALE: `success`=all acked flag, `txed_vs_acked` = **failed** MPDUs (matches RS_MNG_STATISTICS primary txed/acked).
+
+### 13.2 Playground additions (`doc/tlc_playground.html`, Simulation tab)
+- **Mode bar** (`setSimMode(m)`, `SIM_MODE`, default 2): **1 Synthetic** (segments only, lab cleared) · **2 Lab TVA sweep (JSON)** (`.labOnly` controls + bundled `LAB_REF`, TVA sweep preset if <5 segments) · **3 Real trace (sysmon)** (`#traceCard` shown, TVA table hidden, pink overlay only here; re-runs Recreate on entry if a trace is loaded). `⚙️ Engine options & fixes` card + ⚖ A/B are common to all modes.
+- **🔬 Real trace replay**: loads a `.sysmon` text trace (streamed + parsed in the browser, ~2 s for 92 MB) or a `.replay.json` from **`tools/sysmon_to_replay.py`** (same layout). Overlays the real PR (LQ `rate0`), 100 ms tpt and SC spans in **pink** on all 5 charts; real SC log (wider-BW commits ⚠, blocked ⛔); per-rate SR table.
+- **🧪 Recreate**: fits effective SNR to per-rate SR at ≤ main BW (RSSI unused), then `obss<bw>=P` for wider BWs; sets band/Max BW/antennas; picks the closest of 30 Monte-Carlo seeds. Result for this trace: `13336, 1.5, -, 0.01, awgn, obss320=0.83`.
+- New segment token **`obss<bw>=P`** (whole-A-MPDU loss at ≥ bw). New preset *wide-BW trap (OBSS on upper 160)*.
+- **Monte-Carlo** (checkbox + seed): `mcWindow()` — A-MPDUs ≤5.4 ms, bursty per-PPDU hit, per-MPDU PER, retry rungs one 5.4 ms PPDU each (dwell sends the initial rate twice, `INITIAL_RATE_NUM=2`), dwell windows = 5 A-MPDUs.
+- **FW-exact** (`opt.fw`): avoid-higher-MCS (blocks upscale + SC 1 s, blocked SCs logged), incumbent = measured tpt, SC target = measured tpt when SR ≤ 90%. **Always on in the playground since 2026-10-13** (checkbox removed; standard presets moved slightly, e.g. sudden drop 2594→2640 Mbps). Python `ReferenceTLC(fw=)` stays **opt-in** — with fw on its simpler TLC collapses on the standard scenarios (e.g. sudden_drop 1235→38 Mbps); `tools/replay_ab.py` sets it explicitly.
+- **Fixes** (`makeTLC` opts): FIX 1 `wideConfirm` (3 passing test windows for a wider BW), FIX 2 `floorEscape` (MCS 0 & SR<50% → SC now, ignores avoid, never wider), FIX 3 `wideBackoff` (BW left <3 s after commit barred 2→16 s).
+- **⚖ A/B** (N seeds): real trace vs baseline vs each fix vs all → avg Mbps, drop time (100 ms bins < 40% of real median), time >160 MHz, wider-BW commits, blocked SCs.
+- All new behaviour is **opt-in**; with the checkboxes off every existing preset gives identical KPIs (verified vs HEAD).
+
+### 13.3 Results (20–40 seeds)
+| | avg Mbps | drop s | s >160 | wider commits |
+|---|---|---|---|---|
+| Real trace | 87 | 2.70 | 2.62 | 2 |
+| Sim, current FW | 84–86 | 2.2–2.6 | 2.7–3.1 | 2.3–2.4 |
+| + FIX 1 | ~101 | ~0.1 | ~0.1 | 0.1 |
+| + FIX 2 | ~89 | ~1.8 | ~2.0 | ~1.6 |
+| + FIX 3 | ~89 | ~1.9 | ~2.2 | ~1.9 |
+| all | ~101 | ~0.0 | ~0.0 | 0.1 |
+- Known gaps: sim blocked-SC count ~20 vs real 4 (sim retry airtime per failed A-MPDU shorter → FAIL counter fills faster); AWGN LUT makes GI 3.2 (4×LTF) ~1 dB better at low SNR so the sim prefers M2·3.2 µs where FW used M1·0.8 µs; real MIMO penalty (81%) not in AWGN.
+- **Closed (2026-10-13):** fit now uses first-transmission A-MPDUs only; SNR from SISO short-GI rates, then segment tokens **`mimo=<dB>`** / **`lgi=<dB>`** (extra SNR loss for MIMO / long GI, `PEN_OVERRIDE` in `perLookup`; Python `Seg(mimo_db=, lgi_db=)`). Fit for ZoharBadLog: `13336, 1.5, -, 0.01, awgn, obss320=0.79, mimo=2, lgi=0.5` (rms 2%). Monte-Carlo dwell windows add **`MC_FAIL_S` = 10 ms** per A-MPDU with no ACK (BA timeout + backoff; Python `emulator.FAIL_S`), fitted to the real trap timing. Mode-3 "Real log vs simulated FW" table (`renderTraceCompare`) now matches on all rows incl. most-used rate (M1·SISO·160·0.8 µs).
+
+### 13.4 Python parity (done 2026-10-13, all opt-in; defaults byte-identical — `tlc_run.csv` unchanged)
+- B1 `Seg(obss={320: P})` / `ChannelState.loss(bw)`; B2 `per()` uses it, new `phy_fail()`.
+- B3 `simulate_window_mc()` + `ppdu_frames()` (= playground `mcWindow`); B6 `run_sim(..., mc_ppdu=True)`; B5 `RunResult.events` (search-cycle log incl. blocked).
+- B4 `ReferenceTLC(fw=, wide_confirm=, floor_escape=, wide_backoff=, init_rate=)`. `fw` also adds the 200 ms upscale guard and 300 ms stale-window reset (the playground already had both). Also fixed: MCS no longer decrements below 0.
+- `scenarios.wide_bw_trap()`; **`tools/replay_ab.py <trace.sysmon|.replay.json> [--seeds N] [--csv]`** = the playground's Recreate + A/B in Python (~2 s for 20 seeds).
+- Python baseline traps harder than the playground (drop ≈3.8 s vs real 2.7; ReferenceTLC lacks the JS MCS cooldown); fix ranking is the same: FIX 1 ≫ FIX 2 > FIX 3.
+- Not ported: `gui.py` has no UI for these options; `PERModel/build_tva_compare.py` (deterministic TVA port) unchanged.
+
+### 13.5 Shared interference timeline (common random numbers, 2026-10-13)
+- Monte-Carlo whole-A-MPDU loss is now a **fixed busy/free timeline per seed** (`busyAt` / Python `emulator.busy_at`): one hashed draw per **5.9 ms slot** (A-MPDU + overhead) and per source (collision, each `obss<bw>`), independent of TLC decisions. Every variant with the same seed meets the same bursts at the same times → current FW and FIX runs coincide until a decision differs, and drops line up. Per-MPDU PER outcomes are also keyed by (seed, rate, slot, MPDU index) — no sequential RNG in the MC window — so the same action at the same time always gets the same result; variants diverge only where their logic acts.
+- Mode-3 throughput chart: real + current FW + dashed FIX 1/2/3 lines (same seed, `TR_VARS`), one "on 320 MHz" strip per series; comparison table moved to its own card (`#cmpCard`) under the chart with one column per fix.
+- FIX 2 bug fixed: a FLOOR search is no longer cut short by avoid-higher-MCS (it stopped after the first column).
+- **Finding:** with time-correlated interference FIX 1 weakens (20 seeds, playground: drop 3.33 → 1.39 s; Python 3.44 → 1.87 s) because its 3 back-to-back test windows (~7 ms) fall in the same free gap. Confirmation should be **spread in time**. FIX 2 now helps (1.71 / 0.44 s); all three ≈ 0.1–0.7 s.
+
+### 13.6 Trap moments scripted from the log (`quiet<bw>=t1/t2`, 2026-10-14)
+- Goal: the drop appears at the **same place for every algorithm**, so a fix is judged on the real trap, not on dodging random luck.
+- Token `quiet320=7.37/9.69` (s; real search cycles that committed 320) + optional `gap=<ms>` (default **5 ms** = one 20-frame test; the log's first dwell stat after the lucky test was 0/61). Engine: `busyAt(ch,bw,t,seed,opp,dwell)` / Python `busy_at(..., opp, dwell)`, `Seg/ChannelState.quiet`, `quiet_gap_ms`.
+- Rules: at BW ≥ 320, **tests** are always blocked except one quiet gap per opportunity; the gap opens at the first 320 transmission in **[t − 300 ms, t + 600 ms]** (> one ~0.53 s search period). If that window still fails (e.g. a MIMO test at 1.5 dB) the opportunity is refunded. **Dwell** traffic outside the gap sees `obss320` (in-trap SR ≈ 20%, as in the log). Without `quiet`, behaviour is unchanged (regression byte-identical).
+- Playground: checkbox **"trap moments from the log"** (trace card, default on, persisted); recreate emits both `obss320` and `quiet320`. Python: `replay_ab.py` uses it by default, `--random-traps` to disable, `--gap ms`.
+- Results, 20 seeds (playground avg Mbps / drop s): FW 87 / 2.04 (real 87 / 2.70); FIX 1 88 / 1.90; FIX 2 94 / 0.91; FIX 3 92 / 1.34; all 96 / 0.67. Python: FW 89 / 1.75, FIX 1 90 / 1.67, FIX 2 84 / 0.07, FIX 3 93 / 1.25.
+- **Sensitivity:** only FIX 1 depends on the gap length: gap 3 ms → FIX 1 removes both traps (2nd confirm fails); gap ≥ 5 ms → all 3 confirms pass, no gain. The log only bounds the gap to 2–44 ms, so FIX 1's value is unproven; FIX 2 / FIX 3 are robust to it.
+- **Bug fixed (Monte-Carlo A-MPDU cap):** `mcPpduFrames` / `ppdu_frames` capped a PPDU at 256 × 1500 B, so at MCS 13/320 MIMO a PPDU was 0.61 ms + 0.5 ms overhead → 55% of PHY (TVA mode showed 2751 vs lab 4607 Mbps). Now airtime-limited only (5.4 ms; EHT 1024 BA × A-MSDU never binds) → 4530 vs lab 4607. Low-rate runs (ZoharBadLog) and the default regression are unchanged.
+
+---
+
+## 14. Transcript pointer
 
 Full uncompacted conversation transcript (for exact snippets/code):
 ```
