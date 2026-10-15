@@ -21,6 +21,7 @@ FAIL_S = 0.010   # dwell: extra airtime per A-MPDU with no ACK (BA timeout + dou
 class WindowStats:
     txed: int
     acked: int
+    cts: Optional[float] = None   # share of primary-rate RTS answered by a CTS (None = no RTS)
 
     @property
     def sr(self) -> float:
@@ -38,7 +39,7 @@ def simulate_window(rate_table: List[Rate], ch: ChannelState, window_frames: int
         acked = sum(1 for _ in range(window_frames) if rng.random() > p)
     else:
         acked = round(window_frames * (1.0 - p))
-    return WindowStats(txed=window_frames, acked=acked)
+    return WindowStats(txed=window_frames, acked=acked, cts=1.0 - ch.loss(primary.bw))
 
 
 def ppdu_frames(r: Rate, frame_bits: float) -> int:
@@ -100,6 +101,18 @@ def busy_at(ch: ChannelState, bw: int, t_ms: float, seed: int,
     return any(bw >= k and _slot_rand(seed, 1000 + k, s) < p for k, p in ob.items())
 
 
+def cts_fail(ch: ChannelState, bw: int, t_ms: float, seed: int) -> bool:
+    """RTS before every A-MPDU: no CTS when the medium at the receiver is busy at this BW. Ignores the quiet
+    gap (log: the lucky 320 test got CTS on only 6 of 23 RTS; RTS@320 81% vs RTS@160 26% no-CTS)."""
+    s = int(t_ms // SLOT_MS)
+    ob = ch.obss or {}
+    if ch.collision > 0 and _slot_rand(seed, 1, s) < ch.collision:
+        return True
+    if any(bw >= k and k not in ob for k in (ch.quiet or {})):
+        return True
+    return any(bw >= k and _slot_rand(seed, 1000 + k, s) < p for k, p in ob.items())
+
+
 def simulate_window_mc(primary: Rate, stable: Optional[Rate], n: int, ch: ChannelState,
                        frame_bits: float, fail_s: float = 0.0,
                        t0_ms: float = 0.0, seed: int = 1, opp: Optional[dict] = None) -> McWindow:
@@ -115,14 +128,18 @@ def simulate_window_mc(primary: Rate, stable: Optional[Rate], n: int, ch: Channe
     per_r = [phy_fail(r, ch) for r in chain]
     npp = ppdu_frames(primary, frame_bits)
     acked = deliv = 0
+    rts = cts = 0
     air = 0.0
     if opp is not None:
         opp['last'] = None
 
     # every random outcome is keyed by (seed, rate, time slot, MPDU index): same action at the same time -> same result
     def send(k, m):
-        nonlocal air
+        nonlocal air, rts, cts
         t_ms, r = t0_ms + air * 1000, chain[k]
+        if k == 0:
+            rts += 1
+            cts += not cts_fail(ch, r.bw, t_ms, seed)
         busy = busy_at(ch, r.bw, t_ms, seed, opp, fail_s > 0)
         air += m * t_r[k] + OVH_S
         ok = 0
@@ -150,5 +167,5 @@ def simulate_window_mc(primary: Rate, stable: Optional[Rate], n: int, ch: Channe
             fail = fit - ok2
     if opp is not None and opp.get('last') is not None and acked < n / 2:
         del opp[opp['last']]   # quiet gap wasted on a rate that fails anyway: keep the opportunity
-    return McWindow(WindowStats(n, acked), deliv * frame_bits / air / 1e6 if air > 0 else 0.0,
+    return McWindow(WindowStats(n, acked, cts / rts if rts else None), deliv * frame_bits / air / 1e6 if air > 0 else 0.0,
                     air * 1000, 1 - acked / n if n else 0.0)

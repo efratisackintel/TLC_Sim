@@ -66,12 +66,13 @@ class ReferenceTLC(TLC):
     AVOID_SR = 0.70          # RS_MNG_IGNORE_HIGHER_MCS_THRESHOLD_SR
     AVOID_MS = 1000          # RS_MNG_UPSCALE_IGNORE_HIGHER_MCS
     FLOOR_SR = 0.50          # FIX 2 trigger
+    CTS_REL = 0.50           # FIX 7: wider BW is bad when its CTS ratio < 50% of the next narrower BW's
     STALE_MS = 300           # fw: older window stats are reset, not averaged (as the playground)
-    fw = wide_confirm = floor_escape = wide_backoff = False
+    fw = wide_confirm = floor_escape = wide_backoff = cts_guard = False
     init_rate: Optional[Rate] = None
 
     def __init__(self, fw: bool = False, wide_confirm: bool = False, floor_escape: bool = False,
-                 wide_backoff: bool = False, init_rate: Optional[Rate] = None):
+                 wide_backoff: bool = False, init_rate: Optional[Rate] = None, cts_guard: bool = False):
         """Mirrors the playground's makeTLC opts. All default off here (the playground always runs with fw on;
         this simpler TLC is only validated with fw on for Monte-Carlo trace replays, see tools/replay_ab.py).
 
@@ -82,9 +83,12 @@ class ReferenceTLC(TLC):
         wide_confirm — FIX 1: a wider-BW test column must pass 3 consecutive test windows.
         floor_escape — FIX 2: at MCS 0 with SR < 50% search at once (ignores avoid), never wider.
         wide_backoff — FIX 3: a wider BW abandoned < 3 s after commit is barred 2 s, doubling to 16 s.
+        cts_guard    — FIX 7: EWMA CTS ratio per BW; a wider BW whose ratio is < 50% of the next narrower BW's
+                       is never committed, and a committed one is left at once (narrower/other columns).
         init_rate    — warm start (FW _rsMngSetInitRate); default SISO / narrowest BW / MCS 0."""
         self.fw, self.wide_confirm = fw, wide_confirm
         self.floor_escape, self.wide_backoff = floor_escape, wide_backoff
+        self.cts_guard = cts_guard
         self.init_rate = init_rate
 
     def configure(self, cfg: TLCConfig) -> LinkQuality:
@@ -113,6 +117,7 @@ class ReferenceTLC(TLC):
         self.conf = 0
         self.ban: Dict[int, float] = {}; self.backoff: Dict[int, float] = {}
         self.wide_since = None                 # (bw, t) of the last wider-BW commit
+        self.cts_e: Dict[int, float] = {}      # EWMA CTS ratio per BW (FIX 7)
         self.sc_log: List[dict] = []           # one dict per search cycle (incl. blocked ones)
         self.cur_sc = None
         return self._lq()
@@ -140,6 +145,12 @@ class ReferenceTLC(TLC):
             out.append((n, self.bws[i - 1], g))         # narrower bandwidth
         out.append((n, b, not g))                       # toggle guard interval
         return out
+
+    def _cts_bad(self, bw: int) -> bool:
+        i = self.bws.index(bw)
+        if not self.cts_guard or i < 1 or bw not in self.cts_e:
+            return False
+        return self.cts_e[bw] < self.CTS_REL * self.cts_e.get(self.bws[i - 1], 1.0)
 
     def _probe_mcs(self, col) -> int:
         if not self.fw:
@@ -176,7 +187,7 @@ class ReferenceTLC(TLC):
         self.cur_sc = {"t_ms": t_ms, "reason": self.pending_reason, "from": self._rate(),
                        "to": None, "probes": [], "blocked": False}
         self.sc_log.append(self.cur_sc)
-        self.search_q = self._neighbours(t_ms, self.pending_reason == "FLOOR")
+        self.search_q = self._neighbours(t_ms, self.pending_reason in ("FLOOR", "CTS"))
         self.succ = self.fail = 0
         self.state = "SEARCH"; self.mode = "search"; self.conf = 0
         self.col = self.search_q.pop(0)                 # try the first candidate column
@@ -207,6 +218,10 @@ class ReferenceTLC(TLC):
     def on_stats(self, stats: WindowStats, t_ms: float) -> LinkQuality:
         key = (self.col, self.mcs)
         prev = self.sr.get(key)
+        if stats.cts is not None:
+            b = self.col[1]
+            self.cts_e[b] = stats.cts if b not in self.cts_e else \
+                self.EWMA_ALPHA * stats.cts + (1 - self.EWMA_ALPHA) * self.cts_e[b]
         if self.fw and t_ms - self.sr_t.get(key, -1e9) > self.STALE_MS:
             sr = stats.sr                               # stale/new window (FW clears the test column's window)
         else:
@@ -238,7 +253,7 @@ class ReferenceTLC(TLC):
             # real firmware trigger (_rsMngShouldStartSearchCycle):
             reason = None
             if self.succ > self.SUCCESS_LIMIT:
-                if self.last_reason in ("FAIL", "FLOOR"):           # after a fail cycle: re-probe now
+                if self.last_reason in ("FAIL", "FLOOR", "CTS"):    # after a fail cycle: re-probe now
                     reason = "SUCCESS"
                 elif (t_ms - self.last_search_end_ms) > self.SEARCH_TIME_GUARD_MS:
                     reason = "SUCCESS"                               # else guard ~300 ms
@@ -249,7 +264,11 @@ class ReferenceTLC(TLC):
                      and t_ms - self.last_search_end_ms > self.UPSCALE_GUARD_MS)
             if floor:
                 reason = "FLOOR"
-            if reason is not None and self.avoid_hi and not floor:
+            cts_esc = (not floor and self._cts_bad(self.col[1])
+                       and t_ms - self.last_search_end_ms > self.UPSCALE_GUARD_MS)
+            if cts_esc:
+                reason = "CTS"
+            if reason is not None and self.avoid_hi and not floor and not cts_esc:
                 # FW: _rsMngSearchBetterCol returns FALSE -> the cycle starts and ends at once
                 self.sc_log.append({"t_ms": t_ms, "reason": reason, "from": self._rate(),
                                     "to": self._rate(), "probes": [], "blocked": True})
@@ -263,7 +282,9 @@ class ReferenceTLC(TLC):
             cand = self._avgtpt(self.col, self.mcs, sr)
             if self.cur_sc is not None:
                 self.cur_sc["probes"].append((self._rate(), round(cand, 1), round(sr, 2)))
-            if self.wide_confirm and self.col[1] > self.stable_col[1]:
+            if self.col[1] > self.stable_col[1] and self._cts_bad(self.col[1]):
+                pass                                             # FIX 7: receiver doesn't clear this BW
+            elif self.wide_confirm and self.col[1] > self.stable_col[1]:
                 c = self._avgtpt(self.col, self.mcs, stats.sr)   # raw test window, no EWMA carry-over
                 if c > self.best[2]:
                     self.conf += 1
@@ -274,7 +295,7 @@ class ReferenceTLC(TLC):
                 self.conf = 0
             elif cand > self.best[2]:
                 self.best = (self.col, self.mcs, cand)
-            if self.fw and self.avoid_hi and self.pending_reason != "FLOOR":
+            if self.fw and self.avoid_hi and self.pending_reason not in ("FLOOR", "CTS"):
                 self.search_q = []                               # FW: no more columns while avoid is set
             if self.search_q:
                 self.col = self.search_q.pop(0)

@@ -2,7 +2,7 @@
 
 > Purpose: everything needed to **restart the conversation** without losing context.
 > Scope: the `TLC_Sim` teaching/simulation project and the real firmware TLC facts it models.
-> Last updated: 2026-10-12.
+> Last updated: 2026-10-14 (see §13.11 for the current insights and done / TBD list).
 
 ---
 
@@ -14,7 +14,8 @@
 > First, read `doc/TLC_Sim_Handoff.md` end-to-end to load full context — it's the up-to-date
 > restart doc (project overview, the tlcsim/ B1–B6 engine, the browser playground, FW facts,
 > and this project's history incl. delay-spread profiles, the FW-faithful retry table §3.5,
-> the collision/SR analysis §11, and the 2026-09 UI restructure + genie/lab & scale-action notes §12).
+> the collision/SR analysis §11, the 2026-09 UI restructure + genie/lab & scale-action notes §12,
+> and the 2026-10 real-sysmon replay, 320 MHz trap and FIX 1–9 work §13 — start with §13.11).
 >
 > Key things to keep in mind:
 > - TWO engines that must stay in sync: the Python package `tlcsim/` (the real engine, run via
@@ -271,7 +272,7 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - Annotate GUI decision plot with NSS/BW/GI (column) changes, not just MCS. *(Done in the browser Simulation tab — separate MCS / BW / streams charts; still open for the Tkinter GUI.)*
 - Add an explicit "no periodic timer — count-driven; 300 ms only rate-limits success searches" note on the HTML condition graphic.
 - Clean up the dead unused `B4FLOW` const still present in the HTML (harmless).
-- **Improvement Idea 1 — Handle collision** (documented in `tlc_sim_improvements.html`): split channel vs collision loss; don't down-scale for contention; protect with RTS. Prototype as an **opt-in "collision-aware TLC" toggle** in the Simulation tab (default OFF = FW-faithful) so the Improvements idea becomes a live A/B. Note: sim RTS is currently **cosmetic** (a flag) — to show Idea 1's benefit, RTS must actually lower the modeled collision rate.
+- **Improvement Idea 1 — Handle collision** (documented in `tlc_sim_improvements.html`): split channel vs collision loss; don't down-scale for contention; protect with RTS. **Partly done (2026-10-14) as FIX 9 (collision-aware downscale) and FIX 7 (CTS guard)** in the playground — see §13.10 / §13.11. Original note: prototype as an **opt-in "collision-aware TLC" toggle** in the Simulation tab (default OFF = FW-faithful) so the Improvements idea becomes a live A/B. Note: sim RTS is currently **cosmetic** (a flag) — to show Idea 1's benefit, RTS must actually lower the modeled collision rate.
 - **Improvement Idea 2 — GI / channel-profile awareness** (see 11.4): **IMPLEMENTED (2026-08-24)** in BOTH engines. B1 carries `delay_spread_us` + named `PROFILES = {"awgn":0.0,"small room":0.5,"office":1.0,"outdoor":3.0}`; B2 adds a synthetic ISI penalty (`isi_penalty()`: SNR penalty `6dB×(τ/GI−1)` + PER floor `0.5·(1−e^−excess)`, tunable via `ISI_SNR_PENALTY_DB/ISI_FLOOR_MAX/ISI_FLOOR_SCALE`). Playground mirror added: a **Channel profile** selector on the Live tab + `isiPenalty()` in `perLookup()`. GI binary (0.8/3.2µs, no 1.6) → **outdoor forces GI 3.2**; **office keeps GI 0.8** at high SNR (its 11% floor beats the ~15% long-GI overhead); small room/awgn unaffected. τ=0 default = backward-compatible.
 - **Fix the B3 doc caveat** (11.2): reword "real firmware separates the two…" → make clear FW counts collision/ACK losses together today; the distinguishing table is Idea 1 (proposed), not current behavior.
 
@@ -397,6 +398,92 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 - **Sensitivity:** only FIX 1 depends on the gap length: gap 3 ms → FIX 1 removes both traps (2nd confirm fails); gap ≥ 5 ms → all 3 confirms pass, no gain. The log only bounds the gap to 2–44 ms, so FIX 1's value is unproven; FIX 2 / FIX 3 are robust to it.
 - **Bug fixed (Monte-Carlo A-MPDU cap):** `mcPpduFrames` / `ppdu_frames` capped a PPDU at 256 × 1500 B, so at MCS 13/320 MIMO a PPDU was 0.61 ms + 0.5 ms overhead → 55% of PHY (TVA mode showed 2751 vs lab 4607 Mbps). Now airtime-limited only (5.4 ms; EHT 1024 BA × A-MSDU never binds) → 4530 vs lab 4607. Low-rate runs (ZoharBadLog) and the default regression are unchanged.
 
+### 13.7 RTS/CTS evidence + CTS guard (was FIX 8, now FIX 7), fix proposals page (2026-10-14)
+- Log (scripts `.claude/.temp/scratch/rts_seq.py`): RTS precedes every A-MPDU. No CTS: RTS@320 **81%**, RTS@160 26%, RTS@20 7%. After a CTS, data@320 got no BA 83% (data@160 9%). From 0–7 s every 320 test RTS went unanswered; the lucky test window had 6/23 CTS. FW does not narrow data BW after CTS (`punc_bw_index` stays 320); RX CTS always logged at 20 MHz (static vs dynamic BW unknown).
+- FIX 8 `opt.ctsGuard` / Python `cts_guard`: EWMA CTS ratio per BW; wider BW with ratio < 50% of the next narrower BW's is never committed, and a committed one is left at once (reason `CTS`, narrower/other columns, bypasses avoid). Model: `ctsFail` / `cts_fail` = busy at the RTS time ignoring the quiet gap; deterministic mode uses 1 − loss(bw).
+- 200 seeds (playground): FW 88 Mbps / 1.92 s → FIX 8 100 / 0.06 s; all simulated 101 / 0.04 s. Python 40 seeds: 89.8 / 1.64 → 99.5 / 0.24. TVA and all synthetic presets identical with FIX 8.
+- `doc/tlc_fix_proposals.html`: short what / why / who / risk page for FIX 1–8 (4–7 = retry-table and LMAC proposals from the user, not simulated yet), linked from the playground's fixes card.
+
+### 13.8 FIX 4–6 simulated (playground only; Python not ported yet) — numbering final: CTS guard = FIX 7
+- `opt.gprNet` (FIX 4): past statistics `hist` = measured tpt per primary rate, kept for the last 10 search cycles; GPR1/2 into retry slots 2–3 (after rate0×2) if peak ≤ rate0's. `opt.banBpr` (FIX 5): primary < 50% of GPR1 tpt for 2 windows and wider BW / more streams than GPR1 → that BW / NSS banned 2 s (`bprBw`/`bprNss`, filtered in `neigh`), search reason `BPR` (bypasses avoid, incumbent −1).
+- **FIX 6 = `opt.sdTable` + `opt.lmacStay` together** (user's intent: 320 fails → the step-down line 160 succeeds → the next A-MPDU starts on 160, not back on 320). `retryChain(p,base,ext)` dwell table = rate0, GPRs, SD(rate0), SD(GPRs), … down to M0·20 (SD = MCS−1, BW/2, SISO, long GI; dedup). `mcWindow` starts each A-MPDU at `lmac.start` (last line with ≥ 50% success; back up one line after 4 successes; reset when the table changes); TLC stats = rate0 first attempts only, window with none → no `onStats`. (An earlier standalone "LMAC stay" FIX 7 was a misreading — alone it parks on the old table's 20 MHz entry: 63 Mbps / 5.3 s — removed.)
+- CTS guard renumbered **FIX 8 → FIX 7** (ids `fix7`/`showF7`, `TR_VARS.fix7`, Python docstrings, `replay_ab.py`).
+- 200 seeds: FIX 4 91 / 1.61 s, FIX 5 94 / 0.81, FIX 6 92 / 1.41, FIX 4+6 95 / 0.96, FIX 7 (CTS) 100 / 0.06, all 1–7 101 / 0.02. Side effects (5 seeds): FIX 6 −20% on "interference burst" (collisions push the LMAC to a ~¼-rate SD line), FIX 4+6 −23%; FIX 6 −3% on the deterministic TVA sweep; FIX 4/5/7 neutral.
+
+### 13.9 FIX 8 — early termination of fatal degradation (user's slide, DCR priority 3)
+- `opt.earlyTerm`: after a search commits a new column (`colSince`), every STAY window is kept in `etWin` (last `ET_MS`=80 ms). Once ≥ 80 ms on the column, if avg SR ≤ `ET_THR`=30% × GPR1 SR or avg tpt ≤ 30% × GPR1 tpt (GPR1 = best `hist` entry of a different column, last 10 SCs; `hist` now stores `sr`) → SC event reason `EARLY`, primary := GPR1 at once (bypasses search/avoid).
+- Slide text says "restore BPR1 TLC operation table" — implemented as restoring **GPR1** (asked the user to confirm).
+- 200 seeds: 96 Mbps / 0.65 s (FW 88 / 1.92); all 1–8 101 / 0.01. Side effects (5 seeds): interference burst +19%, sudden wall −6% (stale GPR1 after a whole-channel drop), fade & recover −2%; TVA unchanged.
+
+### 13.10 FIX 9 collision-aware downscale + high-SNR regression (2026-10-14)
+- `opt.collAware`: `mcWindow` returns per-window `primPP`, `noBaPP` (primary A-MPDUs with 0 acked), `baTx/baOk`; if 0 < noBaPP ≤ 50% of primPP the TLC gets `acked = baOk/baTx·N` (SR without the whole-lost A-MPDUs), else the true count. Deterministic: if hit(bw) ≤ 0.5 → acked = N·(1−PER).
+- `HS_SCN` + `runRegression()` (button **🧪 Regression**): first column = **ZoharBadLog drops** (fitted line with `quiet320`, shows avg Mbps + drop s, threshold 40% of the real median or 41 Mbps), then 6 scenarios at 320 MHz/2 streams (clean 45 dB, TVA 50→35, 35 dB, 45 dB + 2% / 10% collisions, 45 dB with OBSS 2 s), all AB_VARIANTS, `abSeeds` (≤ 20) seeds.
+- Findings: clean high-SNR link = 90% of genie (A-MPDU overhead), no fix changes it. Collisions dominate: FW 2% → 67% of genie, 10% → 19%. FIX 9: +10% / +217% there, +70% "steady", +38% "interference burst", 0 elsewhere; ZoharBadLog 90 Mbps / 2.24 s alone; all 1–9 106 Mbps / 0.06 s (achievable ceiling ≈ 109). FIX 1/3/5/6 lose 8–32% at 10% collisions; FIX 2/6/7 −8 to −10% after a 2 s OBSS burst (slow return to 320).
+- The 7 regression cases are also **🧪 preset buttons** in the Channel scenario card (each sets Max BW 320, 2 antennas, Monte-Carlo).
+- Throughput chart title shows the **genie** rate + avg tpt (`genieTxt()`): ZoharBadLog genie = M1·SISO·160·0.8 µs, 121 Mbps.
+
+### 13.11 Insights & status — sessions 2026-10-12 → 10-14 (read this first)
+
+**Key insights**
+1. **Root cause of the drops (ZoharBadLog):** one lucky 20-frame 320 MHz test (= 1 A-MPDU) commits 320; SR there ~20% (upper 160 busy at the receiver); BA stats can't tell "secondary busy" from "MCS too high" → MCS falls to 0 on 320; avoid-higher-MCS (`rateScaleMng.c` ~L5593/L3932) freezes all searches 1 s; the 320 retry table falls straight to 20 MHz → ~10 Mbps for ~1 s, twice.
+2. **The evidence was in the log:** RTS precedes every A-MPDU; no CTS on 81% of RTS@320 vs 26% @160 (for 7 s before the first trap); after a CTS, data@320 got no BA 83% vs 9% @160. The FW never uses it (data BW not narrowed after CTS; CTS failures not in the TLC SR).
+3. **A real log can't be replayed under a different algorithm** past the first divergent decision (no outcomes for rates not tried). Hence: fit a channel from the log + make randomness fair — common random numbers (fixed interference timeline per seed, PER keyed by time) and **scripted trap moments** (`quiet320`) so every algorithm meets the same traps. Average over seeds, not longer runs.
+4. **Simulator calibration:** Monte-Carlo A-MPDU was capped at 256 × 1500 B → 55% of PHY at MCS13/320 (fixed: airtime-limited only, TVA now matches lab within ~3% at high SNR). A clean link tops out at ~90% of genie (0.5 ms overhead per 5.4 ms A-MPDU): **genie 121 Mbps vs achievable ~109 Mbps** on ZoharBadLog. Deterministic mode = best for rate-choice comparison vs lab (TVA mode defaults to it); Monte-Carlo = best for absolute throughput / real traces, but under-reads mid-SNR (26–32 dB) TVA steps (random SR dips trip avoid-higher-MCS).
+5. **Collisions are the biggest loss at high SNR** (FW: 2% collisions → 67% of genie, 10% → 19%): one whole-lost A-MPDU in a 5-A-MPDU window → SR 80% → MCS down + 1 s cooldown. Same blind spot as the 320 trap, other dimension. (Magnitude depends on the FW stat-window size — validate on a real high-rate log.)
+6. **Hold-offs need a fast way back:** bans / guards that are right for a permanent neighbour (ZoharBadLog) cost 8–10% when the OBSS is transient (2 s burst); fixes that read collisions as "this BW / rate is bad" (FIX 1/3/5/6) lose 8–32% under heavy collisions. Every fix must pass the 🧪 Regression set, not only the trap.
+7. **Retry table + LMAC "stay on the line that succeeded" only helps with a good intermediate line** (160 after 320); with today's table it parks on 20 MHz and starves the TLC of primary stats (TLC goes blind).
+8. **Remaining gap after all fixes** (106 vs ~109 achievable): collision downscales (now FIX 9) and the M0·MIMO vs M1·SISO tie (equal expected tpt, MIMO SR ~81%).
+9. **Better design direction ("TLC 2.0")**: Observe (BA holes vs no BA, CTS per BW, RSSI, retry lines) → Diagnose the cause → act in that dimension; smarter search (confidence bounds on time-spread A-MPDUs, Minstrel-style in-traffic probing, per-column memory, real-goodput objective); Protect (time-limited probation with safety-net table + revert; direction-only guard instead of the global 1 s freeze). The 9 fixes map onto 3 mechanisms.
+
+**Fix status** (ZoharBadLog: 200 seeds, playground; FW 88 Mbps / 1.92 s, real 87 / 2.70)
+
+| # | Fix | Playground | Python | Trap result | Regression note |
+|---|---|---|---|---|---|
+| 1 | Confirm wider BW (3 windows) | ✅ | ✅ | 88 / 1.83 s | −12% @10% coll.; needs time-spread form |
+| 2 | Escape MCS-0 floor | ✅ | ✅ | 93 / 0.92 s | −9% transient OBSS |
+| 3 | Wider-BW backoff 2→16 s | ✅ | ✅ | 93 / 1.22 s | −12% @10% coll. |
+| 4 | GPR safety net (retry slots 3–4) | ✅ | ❌ | 91 / 1.61 s | neutral |
+| 5 | Ban bad primary rates 2 s | ✅ | ❌ | 94 / 0.81 s | −8% @10% coll. |
+| 6 | Step-down table + start on last good line | ✅ | ❌ | 92 / 1.41 s (4+6: 95 / 0.96) | −32% @10% coll., −10% transient OBSS, −3% TVA |
+| 7 | CTS guard (RTS/CTS per BW) | ✅ | ✅ | **100 / 0.06 s** | −8% transient OBSS (slow CTS-EWMA recovery) |
+| 8 | Early termination (80 ms, 30% of GPR1) | ✅ | ❌ | 96 / 0.65 s | +17% @10% coll., −6% sudden wall (stale GPR1) |
+| 9 | Collision-aware downscale | ✅ | ❌ | 90 / 2.24 s | **+70% steady, +217% @10% coll.**, 0 on clean |
+| all | 1–9 | ✅ | — | **106 / 0.06 s** | |
+
+Current recommendation: **FIX 7 + FIX 9 + FIX 8**; FIX 1/3/5/6 only once made collision-aware (trigger on CTS / BA-timeout signals, not raw SR).
+
+**TLC 2.0 status**
+
+| Stage / idea | Status |
+|---|---|
+| Observe: BA holes vs no BA | ✅ (FIX 9) |
+| Observe: CTS answered per BW | ✅ (FIX 7) |
+| Observe: dynamic-BW CTS (which BW is clear) | ❌ TBD — not modelled; FW question (log shows every CTS at 20 MHz) |
+| Observe: RSSI trend | ❌ TBD |
+| Observe: retry-line outcomes | 🟡 used by FIX 6 for the start line, not as a diagnosis |
+| Diagnose: secondary busy → BW down | ✅ (FIX 7) |
+| Diagnose: collision → hold MCS | ✅ (FIX 9) |
+| Diagnose: MIMO ≪ SISO SR at equal tpt → SISO (FIX 10 tie-break) | ❌ TBD |
+| Diagnose: one unified classifier | ❌ TBD (today separate options) |
+| Search: confidence bound, time-spread samples | ❌ TBD |
+| Search: Minstrel-style probing inside traffic | ❌ TBD |
+| Search: per-column memory steering the probes (+ burstiness) | 🟡 past stats (last 10 SCs) feed FIX 4/5/8 only |
+| Search: real-goodput objective | 🟡 measured SR × expected tpt; no MAC/retry cost |
+| Protect: GPR in retry slots 3–4 | ✅ (FIX 4) |
+| Protect: step-down table + continue on the good line | ✅ (FIX 6) |
+| Protect: 80 ms monitor + revert | ✅ (FIX 8) |
+| Protect: one time-limited probation state | ❌ TBD (FIX 8 stays armed indefinitely → −6% sudden wall) |
+| Protect: direction-only guard replacing the global 1 s freeze | 🟡 FIX 2/5/7/8 bypass it for their escapes; freeze itself still there |
+
+**TBD / open items**
+- Build "TLC 2.0" as one alternative engine in the playground and run it through 🧪 Regression (proposed next step).
+- Python parity for FIX 4, 5, 6, 8, 9 (only 1–3, 7 are in `tlcsim/` + `tools/replay_ab.py`).
+- Run 🧪 Regression with 20 seeds and refresh `doc/tlc_fix_proposals.html` with it (the 20-seed run was cancelled; page still has 5-seed regression numbers, the FIX 7 card still says "no side effects" — it is −8% on transient OBSS, FIX 2 "risk low" is −9% there, FIX 5 is −8% at 10% collisions, and the side-effects table lacks FIX 9).
+- Questions for the user / FW team: FIX 8 slide says "restore **BPR1**" — simulated as GPR1 (confirm); RTS static vs dynamic BW signalling; EHT GI code order for step-down (code 2 = 0.8 µs 4×LTF is shorter than code 1 = 1.6 µs); FW stat-window size at high rates (drives the collision-loss magnitude).
+- Validate on more real logs (other 320 drops, mobility, deep fades, MIMO losses, crowded channels) — everything so far is tuned on one log.
+- Git: commit `30eee03` + tag **`sysmon-replay-v1.0`** (pushed) = sysmon replay through the TVA default fix. **Everything after it is uncommitted** (FIX 4–9, RTS/CTS model, regression, proposals page, genie title, preset buttons, renumbering, handoff §13.7–13.11).
+- Scratch analysis scripts (gitignored): `.claude/.temp/scratch/rts_probe.py`, `rts_dump.py`, `rts_seq.py` (RTS/CTS per BW from the sysmon), `tlc_regress.py` (Python default regression, run with `.` as arg).
+
 ---
 
 ## 14. Transcript pointer
@@ -404,4 +491,8 @@ Tkinter + matplotlib. Controls: scenario preset textbox (`ms, quality[, quality_
 Full uncompacted conversation transcript (for exact snippets/code):
 ```
 c:\Users\eisack\AppData\Roaming\Code\User\workspaceStorage\33ef86635bcec206c8574fd5b0dcc230\GitHub.copilot-chat\transcripts\8d9dbd37-bb7d-4334-84b2-fda20d805af8.jsonl
+```
+Sessions 2026-10-12 → 10-14 (§13: sysmon replay, 320 trap, FIX 1–9):
+```
+c:\Users\eisack\AppData\Roaming\Code\User\workspaceStorage\efcfd5e62783e3ad73caa6af52a106ce\GitHub.copilot-chat\transcripts\f247ebf5-18c2-40d3-9d40-51962282719d.jsonl
 ```

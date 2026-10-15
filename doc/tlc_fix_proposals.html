@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TLC fix proposals — wide-BW (320 MHz) trap</title>
+<style>
+  body{font-family:"Segoe UI",Arial,sans-serif;margin:0;background:#f4f7fb;color:#1e293b;}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px;}
+  h1{color:#0b4f86;margin:0 0 6px;font-size:26px;}
+  h2{color:#0071C5;font-size:19px;margin:26px 0 10px;}
+  .sub{color:#64748b;font-size:14px;margin-bottom:18px;}
+  .card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 20px;margin-bottom:14px;}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;}
+  th,td{border:1px solid #dbe3ee;padding:6px 8px;text-align:left;vertical-align:top;}
+  th{background:#eef4fb;color:#0b4f86;}
+  td.n{text-align:right;white-space:nowrap;}
+  .good{color:#166534;font-weight:600;} .bad{color:#b91c1c;font-weight:600;} .mid{color:#a16207;font-weight:600;}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;margin-left:6px;vertical-align:middle;}
+  .sim{background:#dcfce7;color:#166534;} .prop{background:#fef3c7;color:#92400e;}
+  .fix{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:14px;}
+  .fix b{color:#334155;}
+  .fix h3{grid-column:1/3;margin:0 0 6px;font-size:16px;color:#0b4f86;}
+  code{background:#f1f5f9;padding:0 4px;border-radius:4px;font-size:12.5px;}
+  .flow{font-size:14px;line-height:1.6;}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>TLC fix proposals — the wide-BW (320 MHz) trap</h1>
+<div class="sub">Case: <code>ZoharBadLog.sysmon</code> (Scorpius2-Whp, 6 GHz, 13.3 s, uplink). Two throughput drops of ~1 s each, caused by committing to 320 MHz instead of 160 MHz.
+Simulation: TLC playground, mode 3 (real trace) — the same scenario and the same trap moments for every algorithm, mean of 200 Monte-Carlo seeds. All 9 fixes are checkboxes in the playground (Engine options &amp; fixes).</div>
+
+<div class="card flow">
+<h2 style="margin-top:0">What goes wrong (from the log)</h2>
+<ol>
+  <li><b>Lucky test.</b> One short 320 MHz test window (20 frames, ~2 ms) passes, so the search cycle commits to 320 MHz.</li>
+  <li><b>Wrong dimension.</b> On 320 MHz the success rate falls to ~20%. BA-based stats can't tell "MCS too high" from "upper 160 MHz busy", so the TLC lowers <b>MCS</b> down to MCS 0 and stays on 320 MHz.</li>
+  <li><b>Frozen.</b> The SR drop sets avoid-higher-MCS (<code>rateScaleMng.c</code> ~L5593), which blocks every search cycle for 1 s (<code>RS_MNG_UPSCALE_IGNORE_HIGHER_MCS</code>).</li>
+  <li><b>Steep retry table.</b> The 320 MHz retry table falls straight from 320 MHz to 20 MHz (9 duplicate entries), so throughput in the trap is only ~10 Mbps.</li>
+  <li><b>The warning was already there.</b> The FW sends RTS before every A-MPDU: <b>81% of RTS on 320 MHz got no CTS</b> (160 MHz: 26%). Even when a CTS came back, <b>83% of 320 MHz A-MPDUs got no BA</b> (160 MHz: 9%). None of this reaches the rate decision.</li>
+</ol>
+</div>
+
+<h2>Summary</h2>
+<div class="card">
+<table>
+<tr><th>#</th><th>Fix</th><th>Targets step</th><th>Effect on the trap</th><th class="n">avg Mbps</th><th class="n">drop time</th><th>Status</th></tr>
+<tr><td></td><td>Real log</td><td></td><td></td><td class="n">87</td><td class="n">2.70 s</td><td></td></tr>
+<tr><td></td><td>Current FW (simulated)</td><td></td><td></td><td class="n">88</td><td class="n">1.92 s</td><td></td></tr>
+<tr><td>1</td><td>Confirm a wider BW (3 test windows)</td><td>1</td><td>avoid the trap — <span class="bad">fails if the quiet gap is long</span></td><td class="n">88</td><td class="n mid">1.83 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>2</td><td>Escape the MCS-0 floor</td><td>3</td><td>leave the trap at once</td><td class="n">93</td><td class="n good">0.92 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>3</td><td>Wider-BW backoff</td><td>1 (repeat)</td><td>don't fall into the next one</td><td class="n">93</td><td class="n good">1.22 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>4</td><td>GPR safety net in the retry table</td><td>4</td><td>failed frames delivered on a known-good 160 MHz rate</td><td class="n">91</td><td class="n mid">1.61 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>5</td><td>Ban bad primary rates (BPR)</td><td>2, 3</td><td>leave the trap after 2 windows + no re-entry for 2 s</td><td class="n">94</td><td class="n good">0.81 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>6</td><td>Gradual step-down (SD) retry table, next A-MPDU starts on the line that succeeded</td><td>3, 4</td><td>320 fails → 160 succeeds → the following A-MPDUs go out on 160</td><td class="n">92</td><td class="n mid">1.41 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>4+6</td><td>GPR + step-down table (the slide's new table)</td><td>3, 4</td><td>the line after 320 is GPR1 = M1·160</td><td class="n">95</td><td class="n good">0.96 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>7</td><td><b>CTS guard</b> (RTS/CTS statistics per BW)</td><td>1, 2, 5</td><td><b>never enters the trap</b></td><td class="n good">100</td><td class="n good">0.06 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>8</td><td>Early termination of fatal degradation</td><td>3</td><td>back to GPR1 within ~0.2–0.4 s instead of ~1.3 s</td><td class="n">96</td><td class="n good">0.65 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td>9</td><td>Collision-aware downscale</td><td>—</td><td>not aimed at the trap (+2 Mbps, drop 1.92 → 2.24 s); closes the collision gap elsewhere</td><td class="n">90</td><td class="n mid">2.24 s</td><td><span class="tag sim">simulated</span></td></tr>
+<tr><td></td><td>All fixes (1–9)</td><td></td><td>achievable ceiling with MAC overhead ≈ 109 Mbps</td><td class="n good">106</td><td class="n good">0.06 s</td><td></td></tr>
+</table>
+<div class="sub" style="margin:8px 0 0">Drop = 100 ms bins below 41 Mbps (40% of the real median).</div>
+</div>
+
+<h2>Side effects on other scenarios</h2>
+<div class="card">
+<table>
+<tr><th>Scenario (avg Mbps, 5 seeds)</th><th class="n">Current FW</th><th class="n">FIX 4</th><th class="n">FIX 5</th><th class="n">FIX 6</th><th class="n">FIX 4+6</th><th class="n">FIX 7</th><th class="n">FIX 8</th></tr>
+<tr><td>steady</td><td class="n">1734</td><td class="n good">1801</td><td class="n">1734</td><td class="n good">1815</td><td class="n">1698</td><td class="n">1734</td><td class="n">1763</td></tr>
+<tr><td>fade &amp; recover</td><td class="n">2735</td><td class="n">2707</td><td class="n">2735</td><td class="n">2703</td><td class="n">2671</td><td class="n">2735</td><td class="n">2677</td></tr>
+<tr><td><b>interference burst</b> (collisions on all BWs)</td><td class="n">1415</td><td class="n">1415</td><td class="n">1415</td><td class="n bad">1130</td><td class="n bad">1092</td><td class="n">1415</td><td class="n good">1689</td></tr>
+<tr><td>sudden wall (LOS → long → LOS)</td><td class="n">2466</td><td class="n">2466</td><td class="n">2466</td><td class="n">2445</td><td class="n">2424</td><td class="n">2466</td><td class="n mid">2314</td></tr>
+<tr><td>long fade</td><td class="n">2399</td><td class="n">2387</td><td class="n">2399</td><td class="n">2409</td><td class="n">2451</td><td class="n">2399</td><td class="n">2411</td></tr>
+<tr><td>TVA sweep, deterministic</td><td class="n">2602</td><td class="n">2602</td><td class="n">2602</td><td class="n mid">2531</td><td class="n mid">2531</td><td class="n">2602</td><td class="n">2602</td></tr>
+</table>
+<div class="sub" style="margin:8px 0 0">FIX 5 and FIX 7 never change a clean or collision-only scenario. FIX 8 <b>gains 19%</b> under collision bursts (a column switch that turns bad is undone in ~80 ms) but <b>loses 6%</b> on the sudden wall: when the whole channel drops, it restores GPR1 — a rate that was good before the drop and now fails too — instead of letting the search find a robust one. <b>FIX 6 costs ~20% under collisions</b>: two collisions in a row send the A-MPDU to the step-down line (BW/2, SISO, MCS−1 ≈ ¼ of the rate), and the next A-MPDUs stay there until 4 successes per line bring it back up. It also costs ~3% on a clean SNR sweep: halving BW together with MCS on every retry is more expensive than MCS−1 alone when the problem is SNR, not the secondary channel.</div>
+</div>
+
+<h2>High-SNR regression (320 MHz, 2 streams)</h2>
+<div class="card">
+<table>
+<tr><th>avg Mbps, 5 seeds</th><th class="n">clean 45 dB</th><th class="n">TVA 50→35</th><th class="n">35 dB</th><th class="n">45 dB + 2% coll.</th><th class="n">45 dB + 10% coll.</th><th class="n">45 dB, OBSS 2 s</th></tr>
+<tr><td>genie</td><td class="n">5040</td><td class="n">4960</td><td class="n">4526</td><td class="n">4939</td><td class="n">4536</td><td class="n">4613</td></tr>
+<tr><td>Current FW</td><td class="n">4537</td><td class="n">4388</td><td class="n">3507</td><td class="n">3299</td><td class="n bad">849</td><td class="n">2890</td></tr>
+<tr><td>FIX 1</td><td class="n">=</td><td class="n">=</td><td class="n">−1%</td><td class="n">=</td><td class="n bad">−12%</td><td class="n">−2%</td></tr>
+<tr><td>FIX 2</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n bad">−9%</td></tr>
+<tr><td>FIX 3</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n bad">−12%</td><td class="n">−2%</td></tr>
+<tr><td>FIX 4</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">+1%</td><td class="n">=</td></tr>
+<tr><td>FIX 5</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n bad">−8%</td><td class="n">=</td></tr>
+<tr><td>FIX 6</td><td class="n">=</td><td class="n">=</td><td class="n good">+2%</td><td class="n">+1%</td><td class="n bad">−32%</td><td class="n bad">−10%</td></tr>
+<tr><td>FIX 7</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n bad">−8%</td></tr>
+<tr><td>FIX 8</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n">=</td><td class="n good">+17%</td><td class="n good">+6%</td></tr>
+<tr><td><b>FIX 9</b></td><td class="n">=</td><td class="n">=</td><td class="n good">+5%</td><td class="n good">+10%</td><td class="n good"><b>+217%</b></td><td class="n bad">−9%</td></tr>
+<tr><td>All 1–9</td><td class="n">=</td><td class="n">=</td><td class="n good">+4%</td><td class="n good">+8%</td><td class="n">+2%</td><td class="n">−4%</td></tr>
+</table>
+<div class="sub" style="margin:8px 0 0">Playground: 🧪 <b>Regression</b> button (also runs the ZoharBadLog drop case as its first column). No fix changes a clean high-SNR link. The biggest high-SNR loss is <b>collisions</b> (2% → 67% of genie, 10% → 19%), and only FIX 9 addresses it. FIX 1/3/5/6 read collisions as "this BW / rate is bad" and lose 8–32% at 10% collisions — and in "All 1–9" they cancel most of FIX 9's gain. FIX 2/6/7 return to 320 MHz too slowly after a 2 s OBSS burst (−8 to −10%).</div>
+</div>
+
+<h2>The fixes</h2>
+
+<div class="card fix"><h3>FIX 1 — Confirm a wider BW before committing <span class="tag sim">simulated</span></h3>
+<b>What</b><span>A wider-BW test column must pass 3 test windows in a row before it can be committed.</span>
+<b>Why</b><span>One 2 ms test is weak evidence when the secondary channel has bursty interference.</span>
+<b>Who it helps</b><span>Links next to a bursty neighbour network on the secondary channel.</span>
+<b>Risk</b><span>Slower to adopt a clean wider BW. <span class="bad">In simulation the 3 back-to-back tests (~7 ms) fall into the same quiet gap, so it barely helps.</span> Needs confirmation spread over time (e.g. one per search cycle).</span>
+</div>
+
+<div class="card fix"><h3>FIX 2 — Escape the MCS-0 floor <span class="tag sim">simulated</span></h3>
+<b>What</b><span>At MCS 0 with SR &lt; 50%, start a search at once even if avoid-higher-MCS is set; try narrower/other columns only.</span>
+<b>Why</b><span>Avoid-higher-MCS stops upward oscillation, but at MCS 0 there is nothing lower to fall to — the 1 s freeze only locks in a failing link.</span>
+<b>Who it helps</b><span>Any column stuck at its floor: wide BW, MIMO at low SNR, after a fade.</span>
+<b>Risk</b><span>Low: healthy links never reach this state.</span>
+</div>
+
+<div class="card fix"><h3>FIX 3 — Wider-BW backoff <span class="tag sim">simulated</span></h3>
+<b>What</b><span>A wider BW abandoned &lt; 3 s after it was committed is barred from search for 2 s, doubling up to 16 s.</span>
+<b>Why</b><span>Secondary-channel interference is usually a static neighbour network: if 320 MHz just failed, it will fail again.</span>
+<b>Who it helps</b><span>Repeated traps (the second drop in this log).</span>
+<b>Risk</b><span>Always takes the first trap; can wait up to 16 s before retrying a channel that became clean.</span>
+</div>
+
+<div class="card fix"><h3>FIX 4 — GPR safety net in the retry table <span class="tag sim">simulated</span></h3>
+<b>What</b><span>Keep the primary rate + measured throughput of the last 10 search cycles (past statistics). The best two are GPR1/GPR2. Put them in retry-table slots 3–4, only if their expected throughput is ≤ rate0's.</span>
+<b>Why</b><span>Today the trap's retry table jumps 320 → 20 MHz. With GPR1 = M1·160 in slot 3, failed frames are delivered on a rate that is known to work.</span>
+<b>Who it helps</b><span>Any bad switch (wider BW, MIMO, GI): raises throughput while the TLC is on a bad primary. A plain 160 MHz fallback raised in-trap throughput 10 → 24 Mbps.</span>
+<b>Risk</b><span>Does not shorten the trap (time on 320 MHz 1.90 → 1.63 s), only raises throughput in it. History goes stale after a real fade — drop GPRs whose retries also fail.</span>
+<b>Simulated</b><span>Trap table becomes M0·320 → <b>M1·160</b> → <b>M0·160·MIMO</b> → M0·320·long GI → M0·20. 88 → 91 Mbps; neutral or better elsewhere.</span>
+</div>
+
+<div class="card fix"><h3>FIX 5 — Ban bad primary rates (BPR) <span class="tag sim">simulated</span></h3>
+<b>What</b><span>A primary rate whose measured throughput falls below a threshold of GPR1's (e.g. 50%) is marked BPR and banned from operational use for 2 s (or 4 search cycles).</span>
+<b>Why</b><span>Forces the TLC off M0·320 after 1–2 stat windows (~0.1–0.2 s) instead of ~1 s, and stops re-entry.</span>
+<b>Who it helps</b><span>Generalises FIX 2 + FIX 3 to any rate dimension.</span>
+<b>Risk</b><span>In a real fade every rate looks bad against a stale GPR1: never ban the most robust rate, require ≥ 2 windows, and don't ban if GPR1 is also failing. Ban at the dimension level (BW = 320), not one MCS.</span>
+<b>Simulated</b><span>Ban only at the BW / stream-count level, 2 windows, 2 s. Drop 1.92 → 0.81 s, 88 → 94 Mbps — the best of the retry/history fixes; no change on any other scenario.</span>
+</div>
+
+<div class="card fix"><h3>FIX 6 — Gradual step-down (SD) retry table, continue on the line that succeeded <span class="tag sim">simulated</span></h3>
+<b>What</b><span>Replace duplicate retry entries with step-down rates: MCS −1, BW/2, antennas 2→1 (alternate antennas at the lowest rate), GI 0→1→2→3; repeat until a rate not yet in the table. Keep rate0 ×2 and the low/legacy entries. <b>The LMAC starts the next A-MPDU on the line that succeeded</b>, not back on rate0 (same table).</span>
+<b>Why</b><span>Old table: 320 → 9 × M0·20 MHz → legacy, and every A-MPDU starts again on 320. New table: 320 → 160 → 80 → 40 → 20. When 320 fails and 160 succeeds, the good rate is 160 — the following A-MPDUs go out on 160 instead of failing on 320 again.</span>
+<b>Who it helps</b><span>Any sudden degradation of the primary rate: throughput recovers in milliseconds, without waiting for the TLC or the 1 s avoid freeze.</span>
+<b>Risk</b><span>Collisions: a burst moves the LMAC down to a much slower line, and it only climbs back after successes (here: one line up after 4). The TLC gets few samples of rate0 while the LMAC stays lower, so its statistics must include the lines actually used. Check the GI code order: code 2 (0.8 µs, 4× LTF) has a shorter GI than code 1 (1.6 µs).</span>
+<b>Simulated</b><span>Back up one line after 4 successes; TLC stats = rate0 first attempts only. 88 → 92 Mbps, drop 1.92 → 1.41 s; with FIX 4 (GPR1 = M1·160 right after 320): 95 Mbps, 0.96 s. Costs ~20% under collisions and ~3% on a clean SNR sweep — consider stepping MCS first and BW only when MCS is already 0, and a faster way back up (e.g. retry rate0 every N A-MPDUs). The simulator has 2 GI values and no per-antenna channel, so the GI and alternate-antenna steps are approximated.</span>
+</div>
+
+<div class="card fix"><h3>FIX 7 — CTS guard (RTS/CTS statistics per BW) <span class="tag sim">simulated</span></h3>
+<b>What</b><span>Track the share of RTS answered by a CTS per BW (EWMA). If the wider BW's CTS ratio is &lt; 50% of the next narrower BW's: (a) never commit it after a search test; (b) if already on it, leave at once (search narrower/other columns, not blocked by avoid-higher-MCS).</span>
+<b>Why</b><span>BA statistics can't separate "MCS too high" from "secondary channel busy"; CTS can. In this log the receiver didn't answer 81% of RTS on 320 MHz vs 26% on 160 MHz — for 7 s before the first trap. Comparing BWs cancels collisions on the primary channel, which hit both.</span>
+<b>Who it helps</b><span>Wide-BW links (160/320 MHz) next to a neighbour network on the secondary channel — the root cause of this case. No effect on clean channels (TVA and synthetic presets identical).</span>
+<b>Risk</b><span>Uses data the FW already has (RTS is already sent for every A-MPDU here) — no extra airtime. Needs RTS protection to be on; the simulator assumes CTS fails exactly when the wider BW is busy at the receiver (consistent with the log: 81% no-CTS vs fitted 79% loss). Open question for FW: static vs dynamic BW signalling in RTS — the log shows every CTS at 20 MHz, and data after a CTS on 320 MHz is still sent at 320 MHz.</span>
+</div>
+
+<div class="card fix"><h3>FIX 8 — Early termination of fatal degradation <span class="tag sim">simulated</span></h3>
+<b>What</b><span>Detect a drastic fall in the last T = 80 ms (search cycle = 500 ms): current average SR ≤ 30% × GPR1's average SR, or current average tpt ≤ 30% × GPR1's average tpt. On such a fatal error, terminate at once and restore GPR1's TLC operation table — no waiting for the next search cycle or the 1 s avoid-higher-MCS freeze.</span>
+<b>Why</b><span>In the trap the SR on 320 MHz falls to ~20% while GPR1 (M1·160) had ~95%; the firmware sits there ~1.3 s because every search is blocked. GPR1 is a rate that was measured good a moment ago, so going straight back to it is safe.</span>
+<b>Who it helps</b><span>Any column switch that turns out badly: wider BW into OBSS, MIMO into a correlated channel, a lucky test. Also short collision bursts right after a switch.</span>
+<b>Risk</b><span>When the whole channel drops (not just the new column), GPR1 is stale and fails too — it restores the wrong rate before the normal search finds a robust one. Guard: only within one search period of a column switch, or require GPR1 to differ only in the dimension that just changed.</span>
+<b>Simulated</b><span>Only after a search committed a new column (BW / NSS / GI); averages over the windows of the last 80 ms; GPR1 = best rate of a different column in the last 10 search cycles. Trap 7.63–8.95 s becomes 7.63–8.02 s. 88 → 96 Mbps, drop 1.92 → 0.65 s. Side effects: +19% on collision bursts, −6% on the sudden-wall scenario (stale GPR1). The slide says "restore BPR1" — simulated as restoring <b>GPR1</b> (the good rate); please confirm.</span>
+</div>
+
+<div class="card fix"><h3>FIX 9 — Collision-aware downscale <span class="tag sim">simulated</span></h3>
+<b>What</b><span>An A-MPDU that got <b>no BA at all</b> (whole transmission lost: collision / BA timeout) is left out of the success rate the TLC uses for MCS up/down decisions — as long as such A-MPDUs are ≤ 50% of the window. If most of the window is lost this way, it is counted as today (sustained loss is a real problem).</span>
+<b>Why</b><span>A BA with holes means "MCS too high"; no BA at all usually means "someone else transmitted". Today one collided A-MPDU in a window drops the SR to ~80%, the MCS is lowered and the higher MCS is put on a 1 s cooldown — at high SNR the link drifts far below what the channel supports.</span>
+<b>Who it helps</b><span>Every busy channel: <b>+70%</b> on "steady" (5% collisions), +38% on "interference burst", +10% / +217% at 45 dB with 2% / 10% collisions. No change on clean channels, fades or the TVA sweep.</span>
+<b>Risk</b><span>Hidden-node losses that hit every A-MPDU partially still count (correct). A very high MCS that kills the preamble also gives "no BA" — the 50% rule keeps that case as today. On the 320 MHz trap it is slightly negative alone (drop 1.92 → 2.24 s: fewer early downscales on 320) — combine with FIX 7. The FW has the signal today: BA timeout vs BA bitmap.</span>
+</div>
+
+<h2>Suggested order</h2>
+<div class="card flow">
+<ol>
+  <li><b>FIX 7</b> (CTS guard) — targets the root cause, biggest gain, no airtime cost, no side effects.</li>
+  <li><b>FIX 9</b> (collision-aware downscale) — the largest gain outside this case (busy channels, high rates); no side effect on clean links.</li>
+  <li><b>FIX 8</b> (early termination) or <b>FIX 5</b> / <b>FIX 2</b> — leave a bad rate fast. FIX 8 is the fastest (80 ms) and also helps collision bursts, but needs a guard against restoring a stale GPR1 after a real channel drop; FIX 5 is more general (any BW / stream count); FIX 2 is the smallest change.</li>
+  <li><b>FIX 4</b> — known-good rates in the retry table; small gain, no downside seen.</li>
+  <li><b>FIX 6</b> — together with FIX 4, after reducing the collision cost (faster way back up) and the BW-halving cost on SNR-limited links.</li>
+  <li><b>FIX 3</b> — re-entry protection, if FIX 5 is not taken.</li>
+  <li><b>FIX 1</b> — only in its time-spread form, and only if the lab shows short quiet gaps.</li>
+</ol>
+<b>Before shipping:</b> clean-channel regression (TVA sweep), more 320 MHz drop logs, and a lab test with a bursty interferer on the upper 160 MHz.
+</div>
+
+</div></body>
+</html>

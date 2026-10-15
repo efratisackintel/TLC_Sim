@@ -374,9 +374,17 @@
       <label class="ck"><input type="checkbox" id="fix1" onchange="runScenario()"> FIX 1 — confirm a wider BW: 3 consecutive passing test windows before commit</label>
       <label class="ck"><input type="checkbox" id="fix2" onchange="runScenario()"> FIX 2 — escape the MCS-0 floor: SR &lt; 50% at MCS 0 searches at once (not blocked by avoid), narrower/other columns only</label>
       <label class="ck"><input type="checkbox" id="fix3" onchange="runScenario()"> FIX 3 — wider-BW backoff: BW left &lt; 3 s after commit is barred 2→16 s</label>
+      <label class="ck"><input type="checkbox" id="fix4" onchange="runScenario()"> FIX 4 — GPR safety net: best 2 primary rates of the last 10 search cycles in retry slots 3–4 (if rate0 is higher)</label>
+      <label class="ck"><input type="checkbox" id="fix5" onchange="runScenario()"> FIX 5 — ban bad primary rates: &lt; 50% of GPR1's tpt for 2 windows → its wider BW / extra stream banned 2 s, left at once</label>
+      <label class="ck"><input type="checkbox" id="fix6" onchange="runScenario()"> FIX 6 — step-down retry table: duplicates replaced by MCS−1 / BW÷2 / SISO / long-GI steps down to 20 MHz, and the next A-MPDU starts on the line that succeeded (not back on rate0; back up one line after 4 successes)</label>
+      <label class="ck"><input type="checkbox" id="fix7" onchange="runScenario()"> FIX 7 — CTS guard: a wider BW whose RTS get CTS &lt; 50% as often as the narrower BW is never committed, and is left at once</label>
+      <label class="ck"><input type="checkbox" id="fix8" onchange="runScenario()"> FIX 8 — early termination: after a column switch, if the last 80 ms average SR or tpt ≤ 30% of GPR1's, restore GPR1's table at once (no waiting for the next search cycle)</label>
+      <label class="ck"><input type="checkbox" id="fix9" onchange="runScenario()"> FIX 9 — collision-aware downscale: A-MPDUs with no BA at all (collisions) don't count in the SR used for MCS decisions, unless they are &gt; 50% of the window</label>
+      <div class="hint" style="margin-top:4px;">What / why / who for every fix: <a href="tlc_fix_proposals.html" target="_blank">tlc_fix_proposals.html</a>.</div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
         <label style="font-size:12px;">seeds <input id="abSeeds" type="number" value="20" min="1" max="200" style="width:52px;"></label>
         <button class="demoBtn" style="width:auto;margin-top:0;padding:8px 14px;font-size:13px;" onclick="runAB()" title="Current FW vs each fix over N Monte-Carlo seeds of the scenario above (plus the real trace in mode 3)">⚖ Run A/B</button>
+        <button class="demoBtn" style="width:auto;margin-top:0;padding:8px 14px;font-size:13px;" onclick="runRegression()" title="Current FW vs each fix on the real drop case (ZoharBadLog) + 6 high-SNR 320 MHz scenarios (clean, TVA 50→35, 35 dB, 2% / 10% collisions, 2 s OBSS)">🧪 Regression</button>
       </div>
       <div id="abStatus" style="font-size:12px;color:#64748b;margin-top:6px;"></div>
     </div>
@@ -422,7 +430,13 @@
         <label><input type="checkbox" id="showFW" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#0071C5">Current FW</b></label>
         <label><input type="checkbox" id="showF1" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#16a34a">FIX 1</b></label>
         <label><input type="checkbox" id="showF2" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#ea580c">FIX 2</b></label>
-        <label><input type="checkbox" id="showF3" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#7c3aed">FIX 3</b></label></div>
+        <label><input type="checkbox" id="showF3" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#7c3aed">FIX 3</b></label>
+        <label><input type="checkbox" id="showF4" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#b45309">FIX 4</b></label>
+        <label><input type="checkbox" id="showF5" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#be123c">FIX 5</b></label>
+        <label><input type="checkbox" id="showF6" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#4d7c0f">FIX 6</b></label>
+        <label><input type="checkbox" id="showF7" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#0891b2">FIX 7</b></label>
+        <label><input type="checkbox" id="showF8" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#a21caf">FIX 8</b></label>
+        <label><input type="checkbox" id="showF9" checked onchange="if(SCN_RECS)drawScenario(SCN_RECS,SCN_TOTAL)"> <b style="color:#1e3a8a">FIX 9</b></label></div>
       <canvas id="scnTpt" width="900" height="175" style="width:100%;"></canvas>
     </div>
     <div class="card" id="cmpCard" style="margin-top:16px;display:none;">
@@ -778,10 +792,22 @@ function peakTpt(mcs,nss,bw,gi08){
 // Retry table (FW _rsMngBuildRatesTbl): entry 0 = the sent rate (the test rate during a probe);
 // the fallback ladder is built from the STABLE column — during a search cycle that is the
 // pre-search committed rate, not the test column. For dwell/upscale the base is the primary.
-function retryChain(p, base){
+function retryChain(p, base, ext){
   const b = base || p;
   const chain=[{bw:p.bw,mcs:p.mcs,nss:p.nss,gi08:p.gi08}];     // entry 0 = sent (test) rate
   const same = b.bw===p.bw && b.mcs===p.mcs && b.nss===p.nss && b.gi08===p.gi08;
+  if(ext && same && (ext.sd || (ext.gpr&&ext.gpr.length))){   // FIX 4 (GPR safety net) / FIX 6 (step-down) dwell table
+    const rk=r=>r.bw+'/'+r.mcs+'/'+r.nss+'/'+(r.gi08?1:0), seen=new Set([rk(p)]);
+    const add=r=>{ if(seen.has(rk(r))) return false; seen.add(rk(r)); chain.push(r); return true; };
+    const isFloor=r=>r.bw===20&&r.mcs===0&&r.nss===1&&!r.gi08;
+    const gprs=(ext.gpr||[]).filter(g=>peakTpt(g.mcs,g.nss,g.bw,g.gi08)<=peakTpt(p.mcs,p.nss,p.bw,p.gi08));   // only if rate0 is higher
+    gprs.forEach(add);
+    if(ext.sd){ const sd=r=>({bw:Math.max(20,r.bw/2),mcs:Math.max(0,r.mcs-1),nss:1,gi08:false});   // one step down in every dimension
+      for(const r of [p,...gprs]){ let x=sd(r); while(!add(x) && !isFloor(x)) x=sd(x); }
+      let x=chain[chain.length-1]; while(!isFloor(x)){ x=sd(x); add(x); } }
+    else { if(b.mcs>=1) add({bw:b.bw,mcs:b.mcs-1,nss:b.nss,gi08:b.gi08}); if(b.mcs>=2) add({bw:b.bw,mcs:b.mcs-2,nss:b.nss,gi08:b.gi08}); add({bw:b.bw,mcs:0,nss:1,gi08:false}); }
+    add({bw:20,mcs:0,nss:1,gi08:false});
+    return chain; }
   if(!same) chain.push({bw:b.bw,mcs:b.mcs,nss:b.nss,gi08:b.gi08});   // stable rate as first fallback (search)
   if(b.mcs>=1) chain.push({bw:b.bw,mcs:b.mcs-1,nss:b.nss,gi08:b.gi08});
   if(b.mcs>=2) chain.push({bw:b.bw,mcs:b.mcs-2,nss:b.nss,gi08:b.gi08});
@@ -791,9 +817,9 @@ function retryChain(p, base){
 }
 // Airtime-based delivery through the retry chain: a failed primary is redelivered at a
 // fallback rate, so throughput dips to ~the fallback rate (not zero). Returns Mbps + airtime.
-function retryTput(p,base,snr,col,frameBits){
+function retryTput(p,base,snr,col,frameBits,ext){
   const hit=typeof col==='function'?col:()=>col;   // col may be a per-BW loss function (e.g. OBSS on the upper 160)
-  const chain=retryChain(p,base); let reach=1, eT=0, deliv=0, firstFail=0;
+  const chain=retryChain(p,base,ext); let reach=1, eT=0, deliv=0, firstFail=0;
   for(let k=0;k<chain.length;k++){ const r=chain[k];
     const per=perLookup(r.bw,r.mcs,r.nss,r.gi08,snr), fail=1-(1-per)*(1-hit(r.bw));
     const phy=peakTpt(r.mcs,r.nss,r.bw,r.gi08), tR=phy>0?frameBits/(phy*1e6):1e6;
@@ -1152,28 +1178,42 @@ function busyAt(ch,bw,tMs,seed,opp,dwell){ const s=Math.floor(tMs/MC_SLOT_MS);
     if(!dwell || !(k in ob)) return true; }
   for(const k in ob) if(bw>=+k && slotRand(seed,1000+(+k),s)<ob[k]) return true;
   return false; }
+// RTS before every A-MPDU: no CTS when the medium at the receiver is busy at this BW. Ignores the quiet gap
+// (log: the lucky 320 test got CTS on only 6 of 23 RTS; overall RTS@320 81% vs RTS@160 26% no-CTS).
+function ctsFail(ch,bw,tMs,seed){ const s=Math.floor(tMs/MC_SLOT_MS), ob=ch.obss||{};
+  if(ch.col>0 && slotRand(seed,1,s)<ch.col) return true;
+  for(const k in (ch.quiet||{})) if(k!=='gap' && bw>=+k && !(k in ob)) return true;
+  for(const k in ob) if(bw>=+k && slotRand(seed,1000+(+k),s)<ob[k]) return true;
+  return false; }
 // Airtime-limited only: EHT 1024 BA x A-MSDU never binds at 5.4 ms (lab TVA: MCS13/320 MIMO = 91% of PHY).
 function mcPpduFrames(p,frameBits){ const phy=peakTpt(p.mcs,p.nss,p.bw,p.gi08); return Math.max(1,Math.floor(MC_AGG_S*phy*1e6/frameBits)); }
-function mcWindow(p,base,N,ch,t0,seed,frameBits,failS,opp){
+function mcWindow(p,base,N,ch,t0,seed,frameBits,failS,opp,ext,lmac){
   failS=failS||0;
-  const chain=retryChain(p,base);
+  const chain=retryChain(p,base,ext);
   if(chain.length>1 && !(base && (base.bw!==p.bw||base.mcs!==p.mcs||base.nss!==p.nss||base.gi08!==p.gi08))) chain.unshift(chain[0]);   // dwell: FW RS_MNG_RETRY_TABLE_INITIAL_RATE_NUM=2
   const tR=chain.map(r=>{ const phy=peakTpt(r.mcs,r.nss,r.bw,r.gi08); return phy>0?frameBits/(phy*1e6):1; });
   const perR=chain.map(r=>perLookup(r.bw,r.mcs,r.nss,r.gi08,ch.snr));
   const nPP=mcPpduFrames(p,frameBits);
-  let acked=0, deliv=0, air=0; if(opp) opp.last=null;
+  let acked=0, deliv=0, air=0, rts=0, cts=0; if(opp) opp.last=null;
   // every random outcome is keyed by (seed, rate, time slot, MPDU index): same action at the same time -> same result in every variant
-  const send=(k,n)=>{ const tMs=t0+air*1000, busy=busyAt(ch,chain[k].bw,tMs,seed,opp,failS>0), r=chain[k]; air+=n*tR[k]+MC_OVH_S; let ok=0;
+  const send=(k,n,first)=>{ const tMs=t0+air*1000, busy=busyAt(ch,chain[k].bw,tMs,seed,opp,failS>0), r=chain[k]; air+=n*tR[k]+MC_OVH_S; let ok=0;
+    if(first){ rts++; if(!ctsFail(ch,r.bw,tMs,seed)) cts++; }
     if(!busy){ const key=100000+r.bw*100+r.mcs*4+r.nss*2+(r.gi08?1:0), base0=Math.floor(tMs/MC_SLOT_MS)*512;
       for(let i=0;i<n;i++) if(slotRand(seed,key,base0+i)>=perR[k]) ok++; }
     if(!ok) air+=failS; return ok; };
-  for(let left=N; left>0; left-=nPP){ const n=Math.min(nPP,left);
-    const ok=send(0,n); acked+=ok; deliv+=ok; let fail=n-ok;
-    for(let k=1;k<chain.length && fail>0;k++){ const fit=Math.max(1,Math.min(fail,Math.floor(MC_AGG_S/tR[k])));
-      const ok2=send(k,fit); deliv+=ok2; fail=fit-ok2; }
+  // FIX 6 (lmacStay): the LMAC starts each A-MPDU at the last line that succeeded (same table), stepping back up one line after 4 successes
+  const q=chain[0], prim=k=>{ const r=chain[k]; return r.bw===q.bw&&r.mcs===q.mcs&&r.nss===q.nss&&r.gi08===q.gi08; };
+  if(lmac){ const lk=JSON.stringify(chain); if(lmac.key!==lk){ lmac.key=lk; lmac.start=0; lmac.run=0; } }
+  let primTx=0, primOk=0, primPP=0, noBaPP=0, baTx=0, baOk=0;
+  for(let left=N; left>0; left-=nPP){ const n=Math.min(nPP,left), s0=lmac?Math.min(lmac.start,chain.length-1):0;
+    const ok=send(s0,n,true); deliv+=ok; if(prim(s0)){ primTx+=n; primOk+=ok; primPP++; if(ok===0) noBaPP++; else { baTx+=n; baOk+=ok; } } let fail=n-ok, okAt=ok>=n/2?s0:-1;
+    for(let k=s0+1;k<chain.length && fail>0;k++){ const fit=Math.max(1,Math.min(fail,Math.floor(MC_AGG_S/tR[k])));
+      const ok2=send(k,fit,false); deliv+=ok2; if(okAt<0 && ok2>=fit/2) okAt=k; fail=fit-ok2; }
+    if(lmac){ if(okAt===s0){ if(s0>0 && ++lmac.run>=4){ lmac.start=s0-1; lmac.run=0; } } else { lmac.start=okAt>=0?okAt:s0; lmac.run=0; } }
   }
+  acked=primTx?Math.round(primOk*N/primTx):0;   // TLC stats: primary-rate first attempts only
   if(opp && opp.last && acked<N/2) delete opp[opp.last];   // the quiet gap was wasted on a rate that fails anyway: keep the opportunity
-  return {acked, tput:air>0?deliv*frameBits/air/1e6:0, dt:air*1000, firstFail:N?1-acked/N:0};
+  return {acked, primTx, primPP, noBaPP, baTx, baOk, rts, cts, tput:air>0?deliv*frameBits/air/1e6:0, dt:air*1000, firstFail:N?1-acked/N:0};
 }
 
 // opt.fw          : FW details (always on in the playground) — avoid-higher-MCS (rateScaleMng.c ~L5593/L3932/L1901: after a window drops
@@ -1181,12 +1221,25 @@ function mcWindow(p,base,N,ch,t0,seed,frameBits,failS,opp){
 // opt.wideConfirm : FIX 1 — a wider-BW test column must pass 3 consecutive test windows before it can be committed.
 // opt.floorEscape : FIX 2 — at MCS 0 with SR < 50% (can't downscale in-column) search at once, even if avoid is set, never probing a wider BW.
 // opt.wideBackoff : FIX 3 — a wider BW abandoned < 3 s after it was committed is barred from search (2 s, doubling to 16 s).
+// opt.ctsGuard    : FIX 7 — CTS ratio per BW (EWMA of RTS answered). A wider BW whose CTS ratio is < 50% of the next narrower BW's
+//                   is never committed, and a committed one is left at once (search narrower/other columns, not blocked by avoid).
+// opt.gprNet      : FIX 4 — past statistics (primary rates of the last 10 search cycles + measured tpt): GPR1/GPR2 go to retry slots 3-4 if rate0 is higher.
+// opt.banBpr      : FIX 5 — a primary measuring < 50% of GPR1's tpt for 2 windows is a BPR: its wider BW / extra stream is banned 2 s and left at once.
+// opt.sdTable     : FIX 6 — duplicate retry entries replaced by step-down rates (MCS-1, BW/2, SISO, long GI) down to 20 MHz.
+// opt.lmacStay    : FIX 6 — (mcWindow) the LMAC starts each A-MPDU at the last retry line that succeeded, back up one line after 4 successes.
+// opt.earlyTerm   : FIX 8 — after a column switch, if the last 80 ms average SR or tpt is <= 30% of GPR1's, GPR1's table is restored at once.
+// opt.collAware   : FIX 9 — (simulateScenario) A-MPDUs with no BA at all are left out of the SR the TLC scales on, unless they are > 50% of the window.
 function makeTLC(maxBw,maxNss,MAXM,seed,opt){
   opt=opt||{};
   const bws=BANDWIDTHS.filter(b=>b<=maxBw), nssOpts=maxNss>=2?[1,2]:[1];
-  const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300,UPGUARD:200,IGNORE:1000,STALE:300,AVOID_SR:.70,FLOOR_SR:.50};
+  const C={PERF:.95,NODEC:.90,FORCE:.15,SEARCH:20,DWELL:2000,EWMA:.4,SUCC:4500,FAIL:400,GUARD:300,UPGUARD:200,IGNORE:1000,STALE:300,AVOID_SR:.70,FLOOR_SR:.50,CTS_REL:.50,BPR_REL:.50,BPR_MS:2000,PS_SC:10,ET_MS:80,ET_THR:.30};
   let col=[1,bws[0],true], mcs=0, sr={}, srT={}, state='STAY', mode='search', succ=0, fail=0, lastEnd=-1e9, lastReason=null, pending=null, sq=[], best=null, target=0, stayPeak=0, scEvents=[], curSc=null, nextUp=0, avoidMcs=-1, avoidUntil=-1e9, stableCol=[1,bws[0],true], stableMcs=0;
-  let avoidHi=false, avoidHiT=-1e9, conf=0, ban={}, backoff={}, wideSince=null;
+  let avoidHi=false, avoidHiT=-1e9, conf=0, ban={}, backoff={}, wideSince=null, ctsE={};
+  const ctsBad=bw=>{ const i=bws.indexOf(bw); if(!opt.ctsGuard || i<1 || ctsE[bw]===undefined) return false;
+    const ref=ctsE[bws[i-1]]!==undefined?ctsE[bws[i-1]]:1; return ctsE[bw]<C.CTS_REL*ref; };
+  let hist={}, bprCnt=0, bprBw={}, bprNss={};   // FIX 4/5 past statistics: key -> {col, mcs, tpt, sr, sc}
+  let colSince=null, etWin=[];                   // FIX 8: windows on the column committed at colSince
+  const gprs=k=>Object.keys(hist).filter(h=>h!==k && hist[h].sc>=scEvents.length-C.PS_SC).map(h=>hist[h]).sort((a,b)=>b.tpt-a.tpt);
   if(seed){ col=seed.col.slice(); mcs=seed.mcs; }   // warm start: RSSI/SNR-seeded initial rate (FW _rsMngSetInitRate)
   let goodMcs=mcs, goodTpt=0;   // last MCS that met NODEC (search fallback)
   const key=(c,m)=>c[0]+','+c[1]+','+(c[2]?1:0)+','+m;
@@ -1195,10 +1248,13 @@ function makeTLC(maxBw,maxNss,MAXM,seed,opt){
   function bestRateForCol(c,tgt){ for(let m=0;m<=MAXM;m++){ if(peakTpt(m,c[0],c[1],c[2])>=tgt) return m; } return MAXM; }
   function neigh(t,noWider){ const n=col[0],b=col[1],g=col[2],out=[]; for(const nn of nssOpts) if(nn!==n) out.push([nn,b,g]); const i=bws.indexOf(b);
     const ok=bw=>!noWider && !(opt.wideBackoff && ban[bw]>t);
-    if(i+1<bws.length && ok(bws[i+1])) out.push([n,bws[i+1],g]); if(i-1>=0) out.push([n,bws[i-1],g]); out.push([n,b,!g]); return out; }
+    if(i+1<bws.length && ok(bws[i+1])) out.push([n,bws[i+1],g]); if(i-1>=0) out.push([n,bws[i-1],g]); out.push([n,b,!g]);
+    const keep=out.filter(c=>!(bprBw[c[1]]>t) && !(bprNss[c[0]]>t));   // FIX 5: banned BW / stream count
+    return keep.length?keep:[[1,bws[0],false]]; }
   function lq(){ const primary={mcs,nss:col[0],bw:col[1],gi08:col[2]};
+    const ext={sd:!!opt.sdTable, gpr:(opt.gprNet && state==='STAY')?gprs(key(col,mcs)).slice(0,2).map(h=>({mcs:h.mcs,nss:h.col[0],bw:h.col[1],gi08:h.col[2]})):[]};
     const stable=(state==='SEARCH')?{mcs:stableMcs,nss:stableCol[0],bw:stableCol[1],gi08:stableCol[2]}:primary;   // FW: search fallbacks come from the stable column
-    return {primary, stable, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
+    return {primary, stable, ext, thold: mode==='dwell'?C.DWELL:C.SEARCH, mode, state}; }
   // target = raw peak tpt of the stable column this dwell (matches bestRateForCol's raw compare)
   function enter(s,t){
     let good, inc, tgt;
@@ -1207,23 +1263,40 @@ function makeTLC(maxBw,maxNss,MAXM,seed,opt){
     else { good=Math.min(mcs,goodMcs); inc=Math.max(goodTpt,avgtpt(col,good,s)); tgt=Math.max(stayPeak,peakTpt(good,col[0],col[1],col[2])); }   // never seed the search on a rate we just watched fail (FW: fall back to the stable rate)
     stableCol=col.slice(); stableMcs=good;
     target=tgt; best=[col.slice(),good,inc];   // incumbent must be beaten to switch
+    if(pending==='BPR') best[2]=-1;            // FIX 5: the banned rate is not an option
     curSc={n:scEvents.length+1, t, reason:pending, from:[col.slice(),mcs], probes:[], to:null, switched:false}; scEvents.push(curSc);
-    sq=neigh(t,pending==='FLOOR'); succ=fail=0; state='SEARCH'; mode='search'; conf=0; col=sq.shift(); mcs=bestRateForCol(col,target); }
+    sq=neigh(t,pending==='FLOOR'||pending==='CTS'||pending==='BPR'); succ=fail=0; state='SEARCH'; mode='search'; conf=0; col=sq.shift(); mcs=bestRateForCol(col,target); }
   function commit(t){
     const from=curSc?curSc.from[0]:stableCol;
     col=best[0]; mcs=best[1]; state='STAY'; succ=fail=0; stayPeak=0; lastReason=pending; lastEnd=t; mode='dwell';
+    if(from[0]!==col[0]||from[1]!==col[1]||from[2]!==col[2]){ colSince=t; etWin=[]; }
     if(col[1]>from[1]) wideSince={bw:col[1],t};
     else if(wideSince && col[1]<wideSince.bw){ const b=wideSince.bw;
       if(t-wideSince.t<3000){ backoff[b]=Math.min(16000,(backoff[b]||1000)*2); ban[b]=t+backoff[b]; } else backoff[b]=0;
       wideSince=null; }
     if(curSc){ curSc.to=[best[0].slice(),best[1]]; const f=curSc.from,g=curSc.to; curSc.switched=!(f[0][0]===g[0][0]&&f[0][1]===g[0][1]&&f[0][2]===g[0][2]&&f[1]===g[1]); curSc=null; } }
-  return { lq, C, scLog:()=>scEvents, onStats(txed,acked,t){
+  return { lq, C, scLog:()=>scEvents, onStats(txed,acked,t,ctsWin){
     const k=key(col,mcs), swin=acked/txed, prev=sr[k];
+    if(ctsWin!=null){ const b=col[1]; ctsE[b]=ctsE[b]===undefined?ctsWin:C.EWMA*ctsWin+(1-C.EWMA)*ctsE[b]; }
     const stale=srT[k]===undefined||(t-srT[k])>C.STALE, s=stale?swin:C.EWMA*swin+(1-C.EWMA)*sr[k];   // reset IIR when stats are stale (FW stat-reset) so recovery isn't dragged by old ~0 SR
     sr[k]=s; srT[k]=t;
     if(opt.fw){ if(prev!==undefined && prev>=C.PERF && s<C.AVOID_SR){ avoidHi=true; avoidHiT=t; } else if(avoidHi && t-avoidHiT>C.IGNORE) avoidHi=false; }
     succ+=acked; fail+=txed-acked;
     if(state==='STAY'){
+      hist[k]={col:col.slice(),mcs,tpt:avgtpt(col,mcs,s),sr:s,sc:scEvents.length};
+      if(opt.earlyTerm && colSince!==null){   // FIX 8: fatal degradation in the last 80 ms -> restore GPR1's table now
+        etWin.push({t,s:swin,tpt:avgtpt(col,mcs,swin)}); etWin=etWin.filter(w=>w.t>=t-C.ET_MS);
+        const g=gprs(k).find(h=>h.col[0]!==col[0]||h.col[1]!==col[1]||h.col[2]!==col[2]);
+        if(g && t-colSince>=C.ET_MS){ const cs=etWin.reduce((a,w)=>a+w.s,0)/etWin.length, ct=etWin.reduce((a,w)=>a+w.tpt,0)/etWin.length;
+          if(cs<=C.ET_THR*g.sr || ct<=C.ET_THR*g.tpt){
+            scEvents.push({n:scEvents.length+1, t, reason:'EARLY', from:[col.slice(),mcs], probes:[], to:[g.col.slice(),g.mcs], switched:true});
+            col=g.col.slice(); mcs=g.mcs; colSince=null; etWin=[]; succ=fail=0; lastReason='EARLY'; lastEnd=t; mode='dwell'; stayPeak=0;
+            return lq(); } } }
+      let bpr=false;
+      if(opt.banBpr){ const g=gprs(k)[0];
+        if(g && (col[1]>g.col[1]||col[0]>g.col[0]) && hist[k].tpt<C.BPR_REL*g.tpt){
+          if(++bprCnt>=2){ bpr=true; bprCnt=0; if(col[1]>g.col[1]) bprBw[col[1]]=t+C.BPR_MS; else bprNss[col[0]]=t+C.BPR_MS; } }
+        else bprCnt=0; }
       if(s>=C.NODEC){ stayPeak=Math.max(stayPeak,peakTpt(mcs,col[0],col[1],col[2])); goodMcs=mcs; goodTpt=avgtpt(col,mcs,s); }   // remember last known-good rate
       let held=false;
       if(s<C.FORCE||(s<C.NODEC&&mcs>0)){ if(mcs>0){ avoidMcs=mcs; avoidUntil=t+C.IGNORE; mcs--; } }   // cooldown the MCS that just failed
@@ -1231,23 +1304,27 @@ function makeTLC(maxBw,maxNss,MAXM,seed,opt){
       else held=true;
       mode=held?'dwell':'search';
       let reason=null;
-      if(succ>C.SUCC){ if(lastReason==='FAIL'||lastReason==='FLOOR') reason='SUCCESS'; else if(t-lastEnd>C.GUARD) reason='SUCCESS'; }
+      if(succ>C.SUCC){ if(['FAIL','FLOOR','CTS','BPR','EARLY'].includes(lastReason)) reason='SUCCESS'; else if(t-lastEnd>C.GUARD) reason='SUCCESS'; }
       if(reason===null && fail>C.FAIL) reason='FAIL';
       const floor=opt.floorEscape && mcs===0 && s<C.FLOOR_SR && col[1]>bws[0] && t-lastEnd>C.UPGUARD;
       if(floor) reason='FLOOR';
-      if(reason!==null && avoidHi && !floor){   // FW: _rsMngSearchBetterCol returns FALSE -> the cycle starts and ends at once
+      const ctsEsc=!floor && ctsBad(col[1]) && t-lastEnd>C.UPGUARD;
+      if(ctsEsc) reason='CTS';
+      if(bpr && !floor && !ctsEsc) reason='BPR';
+      if(reason!==null && avoidHi && !floor && !ctsEsc && !bpr){   // FW: _rsMngSearchBetterCol returns FALSE -> the cycle starts and ends at once
         scEvents.push({n:scEvents.length+1, t, reason, from:[col.slice(),mcs], probes:[], to:[col.slice(),mcs], switched:false, blocked:true});
         succ=fail=0; lastReason=reason; lastEnd=t;
       } else if(reason!==null){ pending=reason; enter(s,t); }
     } else {
       const cand=avgtpt(col,mcs,s);
       if(curSc) curSc.probes.push({nss:col[0],bw:col[1],gi:col[2],mcs,tpt:Math.round(cand),sr:Math.round(s*100)});
-      if(opt.wideConfirm && col[1]>stableCol[1]){
+      if(col[1]>stableCol[1] && ctsBad(col[1])){ /* FIX 7: receiver doesn't clear this BW -> never commit it */ }
+      else if(opt.wideConfirm && col[1]>stableCol[1]){
         const c=avgtpt(col,mcs,swin);   // raw test-window result, no EWMA carry-over
         if(c>best[2]){ if(++conf<3){ mode='search'; return lq(); } best=[col.slice(),mcs,c]; }
         conf=0;
       } else if(cand>best[2]) best=[col.slice(),mcs,cand];
-      if(opt.fw && avoidHi && pending!=='FLOOR') sq=[];   // FW: no further columns are searched while avoid-higher-MCS is set
+      if(opt.fw && avoidHi && !['FLOOR','CTS','BPR'].includes(pending)) sq=[];   // FW: no further columns are searched while avoid-higher-MCS is set
       if(sq.length){ col=sq.shift(); mcs=bestRateForCol(col,target); mode='search'; }
       else commit(t);
     }
@@ -1265,26 +1342,29 @@ function simulateScenario(segs,cfg){
   TAU_OVERRIDE=chanAt(segs,0).tau; PEN_OVERRIDE=chanAt(segs,0).pen;   // seed uses the starting segment's channel
   const bcd0=bestCand(chanAt(segs,0));   // FW-style: seed the initial rate from the starting SNR
   const seed=cfg.warm?{col:[bcd0.nss,bcd0.bw,bcd0.gi],mcs:Math.max(0,bcd0.mcs)}:null;
-  const rnd=cfg.mc?mulberry32(cfg.seed||1):null, opp={};
+  const rnd=cfg.mc?mulberry32(cfg.seed||1):null, opp={}, lmacSt=(cfg.opt&&cfg.opt.lmacStay)?{}:null;
   const tlc=makeTLC(maxBw,maxNss,MAXM,seed,cfg.opt); let lq=tlc.lq(), t=0; const recs=[]; let g=0;
   while(t<total && g++<200000){
     const ch=chanAt(segs,t), p=lq.primary, hit=hitFn(ch); let N=lq.thold;
     TAU_OVERRIDE=ch.tau; PEN_OVERRIDE=ch.pen;     // per-segment delay spread / penalties drive perLookup + bestCand
     const per=perLookup(p.bw,p.mcs,p.nss,p.gi08,ch.snr), swinE=(1-per)*(1-hit(p.bw));   // primary-rate SR drives the TLC decision (unchanged)
-    let acked, rt, dt, swin;
+    let acked, rt, dt, swin, ctsWin, noStats=false, tlcAcked;
+    const coll=!!(cfg.opt&&cfg.opt.collAware);
     if(rnd){
       if(lq.mode==='dwell') N=Math.min(N,5*mcPpduFrames(p,frame*8));   // FW evaluates every few A-MPDUs, not once per 2000 frames
-      const w=mcWindow(p,lq.stable,N,ch,t,cfg.seed||1,frame*8,lq.mode==='dwell'?MC_FAIL_S:0,opp);
-      acked=w.acked; swin=acked/N; rt={tput:w.tput,firstFail:w.firstFail}; dt=w.dt;
+      const w=mcWindow(p,lq.stable,N,ch,t,cfg.seed||1,frame*8,lq.mode==='dwell'?MC_FAIL_S:0,opp,lq.ext,lq.mode==='dwell'?lmacSt:null);
+      acked=w.acked; swin=acked/N; rt={tput:w.tput,firstFail:w.firstFail}; dt=w.dt; ctsWin=w.rts?w.cts/w.rts:null; noStats=!w.primTx;   // FIX 6: LMAC never tried the primary
+      tlcAcked=(coll && w.noBaPP && w.noBaPP<=w.primPP/2 && w.baTx)?Math.round(w.baOk/w.baTx*N):acked;   // FIX 9: sporadic whole-A-MPDU losses = collisions, not the MCS
     } else {
       if(lq.mode==='dwell' && swinE<tlc.C.FORCE) N=tlc.C.SEARCH;   // FW aborts a failing rate within a few stat updates, not a full optimal window
-      acked=Math.round(N*swinE); swin=swinE;
-      rt=retryTput(p,lq.stable,ch.snr,hit,frame*8);  // retry: fallbacks from the stable column (FW-faithful)
+      acked=Math.round(N*swinE); swin=swinE; ctsWin=1-hit(p.bw);
+      tlcAcked=(coll && hit(p.bw)<=0.5)?Math.round(N*(1-per)):acked;
+      rt=retryTput(p,lq.stable,ch.snr,hit,frame*8,lq.ext);  // retry: fallbacks from the stable column (FW-faithful)
       dt=N*rt.eT*1000;                          // window airtime incl. retries
     }
     const bcd=bestCand(ch);
     recs.push({t,dt,mcs:p.mcs,nss:p.nss,bw:p.bw,gi:p.gi08,snr:ch.snr,col:ch.col,tau:ch.tau,sr:swin,tpt:rt.tput,rty:rt.firstFail,best:bcd.tpt,bestMcs:bcd.mcs,bestBw:bcd.bw,bestNss:bcd.nss,bestGi:bcd.gi,mode:lq.mode,state:lq.state});
-    lq=tlc.onStats(N,acked,t); t+=Math.max(dt,0.02);
+    if(!noStats) lq=tlc.onStats(N,tlcAcked,t,ctsWin); t+=Math.max(dt,0.02);
   }
   TAU_OVERRIDE=null; PEN_OVERRIDE=null;          // don't leak the overrides into the Live tab
   // rolling average achieved throughput over the last 100 ms
@@ -1295,7 +1375,7 @@ function scnCfgFromUi(){
   const ck=id=>!!(document.getElementById(id)||{}).checked;
   return { maxBw:+bw_.value, maxNss:+ant_.value, warm:(document.getElementById('warm')||{checked:true}).checked,
            mc:ck('mcOn'), seed:+((document.getElementById('mcSeed')||{}).value)||1,
-           opt:{fw:true, wideConfirm:ck('fix1'), floorEscape:ck('fix2'), wideBackoff:ck('fix3')} };
+           opt:{fw:true, wideConfirm:ck('fix1'), floorEscape:ck('fix2'), wideBackoff:ck('fix3'), gprNet:ck('fix4'), banBpr:ck('fix5'), sdTable:ck('fix6'), lmacStay:ck('fix6'), ctsGuard:ck('fix7'), earlyTerm:ck('fix8'), collAware:ck('fix9')} };
 }
 function runScenario(){
   if(SIM_MODE===3 && TRACE && traceSegsStale()){ recreateFromTrace(); return; }   // mode 3 always simulates the log's channel
@@ -1305,8 +1385,9 @@ function runScenario(){
   const cfg=scnCfgFromUi(), res=simulateScenario(segs,cfg);
   TR_VARS=null;
   if(SIM_MODE===3 && TRACE){   // same seed, fixes one at a time, for the comparison chart + table
-    const o=cfg.opt, noFix={...o,wideConfirm:false,floorEscape:false,wideBackoff:false}, run=x=>simulateScenario(segs,{...cfg,opt:{...noFix,...x}});
-    TR_VARS={base:(o.wideConfirm||o.floorEscape||o.wideBackoff)?run({}):res, fix1:run({wideConfirm:true}), fix2:run({floorEscape:true}), fix3:run({wideBackoff:true})}; }
+    const FIXV=[{wideConfirm:true},{floorEscape:true},{wideBackoff:true},{gprNet:true},{banBpr:true},{sdTable:true,lmacStay:true},{ctsGuard:true},{earlyTerm:true},{collAware:true}];
+    const o=cfg.opt, noFix={...o}; FIXV.forEach(v=>Object.keys(v).forEach(f=>noFix[f]=false)); const run=x=>simulateScenario(segs,{...cfg,opt:{...noFix,...x}});
+    TR_VARS={base:FIXV.some(v=>Object.keys(v).some(f=>o[f]))?run({}):res}; FIXV.forEach((v,i)=>{ TR_VARS['fix'+(i+1)]=run(v); }); }
   SCN_RECS=res.recs; SCN_TOTAL=total; SCN_SC=res.sc; SCN_SEGS=segs; ZT0=0; ZT1=total; wireScnZoom();
   if(LAB_MODE==='auto' && SIM_MODE===2){ applyDefaultLab(); autoAlignKnee(true); }   // mode 2: bundled lab TVA JSON per Max BW
   drawScenario(res.recs,total);
@@ -1863,7 +1944,7 @@ function renderTrace(){
   }).join('');
 }
 // Side-by-side KPIs (mode 3): the real log vs current FW vs each fix, same seed.
-const VAR_COLS=[['base','Current FW','#0071C5'],['fix1','+ FIX 1','#16a34a'],['fix2','+ FIX 2','#ea580c'],['fix3','+ FIX 3','#7c3aed']];
+const VAR_COLS=[['base','Current FW','#0071C5'],['fix1','+ FIX 1','#16a34a'],['fix2','+ FIX 2','#ea580c'],['fix3','+ FIX 3','#7c3aed'],['fix4','+ FIX 4','#b45309'],['fix5','+ FIX 5','#be123c'],['fix6','+ FIX 6','#4d7c0f'],['fix7','+ FIX 7','#0891b2'],['fix8','+ FIX 8','#a21caf'],['fix9','+ FIX 9','#1e3a8a']];
 function renderTraceCompare(){
   const el=document.getElementById('trCmp'); if(!el) return;
   if(!(SIM_MODE===3 && TRACE && TR_VARS)){ el.innerHTML=''; return; }
@@ -1947,7 +2028,7 @@ function recreateFromTrace(){
   document.getElementById('segs').value='# recreated from '+T.src+': fitted SNR '+fit.snr+' dB from first-transmission SR (rms err '+(fit.err*100).toFixed(0)+'%, '+fit.nRates+' rates)'+
     (ob?'; '+ob+(logLuck?' (obss = P(A-MPDU at that BW wiped); quiet = 320 MHz tests only pass in a short gap near the log\'s trap moments)':' (obss = P(A-MPDU at that BW wiped))')+', mimo / lgi = extra SNR loss in dB':'')+'\n'+Math.round(T.dur)+', '+fit.snr+', -, '+fit.col+', awgn'+(ob?', '+ob:'');
   ['mcOn'].forEach(id=>{ const c=document.getElementById(id); if(c) c.checked=true; });
-  ['fix1','fix2','fix3'].forEach(id=>{ const c=document.getElementById(id); if(c) c.checked=false; });
+  ['fix1','fix2','fix3','fix4','fix5','fix6','fix7','fix8','fix9'].forEach(id=>{ const c=document.getElementById(id); if(c) c.checked=false; });
   upd();
   // pick the Monte-Carlo seed whose run looks most like the trace (drop time, time on the wider BW, wider-BW commits)
   const segs=parseSegs(document.getElementById('segs').value), cfg=scnCfgFromUi(), thr=0.4*median(T.bins), rk=traceKpis(T,thr,T.mainBw);
@@ -1964,8 +2045,46 @@ const AB_VARIANTS=[
   {name:'+ FIX 1 confirm wider BW', opt:{fw:true,wideConfirm:true}},
   {name:'+ FIX 2 escape MCS-0 floor', opt:{fw:true,floorEscape:true}},
   {name:'+ FIX 3 wider-BW backoff', opt:{fw:true,wideBackoff:true}},
-  {name:'All 3 fixes', opt:{fw:true,wideConfirm:true,floorEscape:true,wideBackoff:true}},
+  {name:'+ FIX 4 GPR safety net (retry)', opt:{fw:true,gprNet:true}},
+  {name:'+ FIX 5 ban bad primary rates', opt:{fw:true,banBpr:true}},
+  {name:'+ FIX 6 step-down table + start on last good line', opt:{fw:true,sdTable:true,lmacStay:true}},
+  {name:'+ FIX 4+6 GPR + step-down table', opt:{fw:true,gprNet:true,sdTable:true,lmacStay:true}},
+  {name:'+ FIX 7 CTS guard', opt:{fw:true,ctsGuard:true}},
+  {name:'+ FIX 8 early termination', opt:{fw:true,earlyTerm:true}},
+  {name:'+ FIX 9 collision-aware downscale', opt:{fw:true,collAware:true}},
+  {name:'All fixes (1-9)', opt:{fw:true,wideConfirm:true,floorEscape:true,wideBackoff:true,gprNet:true,banBpr:true,sdTable:true,lmacStay:true,ctsGuard:true,earlyTerm:true,collAware:true}},
 ];
+// Regression set (320 MHz, 2 streams): the real drop case + high-SNR cases — every fix must hold its ground on all of them.
+const HS_SCN={
+  'ZoharBadLog drops':'13336, 1.5, -, 0.01, awgn, obss320=0.79, quiet320=7.37/9.69, mimo=2, lgi=0.5',
+  'clean 45 dB':'10000, 45, -, 0, awgn',
+  'TVA 50\u219235 dB':'1000, 50\n1000, 47\n1000, 44\n1000, 41\n1000, 38\n1000, 35',
+  '35 dB':'10000, 35, -, 0.01, awgn',
+  '45 dB + 2% coll.':'10000, 45, -, 0.02, awgn',
+  '45 dB + 10% coll.':'10000, 45, -, 0.10, awgn',
+  '45 dB, OBSS 2 s':'3000, 45, -, 0.01, awgn\n2000, 45, -, 0.01, awgn, obss320=0.8\n8000, 45, -, 0.01, awgn',
+};
+// Regression cases as Channel-scenario presets: same 320 MHz / 2 streams / Monte-Carlo setup as runRegression()
+(function(){ const box=document.getElementById('scnPresets'); if(!box) return;
+  for(const k in HS_SCN){ const b=document.createElement('button'); b.textContent='\ud83e\uddea '+k; b.title='Regression case \u2014 sets Max BW 320, 2 antennas, Monte-Carlo';
+    b.onclick=()=>{ bw_.value='320'; ant_.value='2'; const c=document.getElementById('mcOn'); if(c) c.checked=true; upd();
+      document.getElementById('segs').value=HS_SCN[k]; runScenario(); };
+    box.appendChild(b); } })();
+async function runRegression(){
+  const out=document.getElementById('abOut'), st=document.getElementById('abStatus'), n=Math.max(1,Math.min(20,+document.getElementById('abSeeds').value||5));
+  const cfg={...scnCfgFromUi(),maxBw:320,maxNss:2,warm:true}, names=Object.keys(HS_SCN), segs=names.map(k=>parseSegs(HS_SCN[k]));
+  const avg=r=>{ let s=0,d=0; for(const x of r.recs){ s+=x.tpt*x.dt; d+=x.dt; } return d?s/d:0; }, gen=r=>{ let s=0,d=0; for(const x of r.recs){ s+=x.best*x.dt; d+=x.dt; } return d?s/d:0; };
+  const genie=segs.map(sg=>gen(simulateScenario(sg,{...cfg,mc:true,seed:1,opt:{fw:true}}))), rows=[];
+  const thr=TRACE?0.4*median(TRACE.bins):41, drop=names.map(k=>/drops/.test(k));   // drop = 100 ms bins below 40% of the real median
+  for(const v of AB_VARIANTS){ st.textContent='regression: '+v.name+'\u2026'; await new Promise(r=>setTimeout(r,0));
+    const dr=[]; rows.push({name:v.name, dr, val:segs.map((sg,i)=>{ let a=0, d=0; for(let s=1;s<=n;s++){ const res=simulateScenario(sg,{...cfg,mc:true,seed:s,opt:v.opt}); a+=avg(res); if(drop[i]) d+=simKpis(res,thr,160).dropMs/1000; } dr[i]=d/n; return a/n; })}); }
+  const b=rows[0].val, cell=(x,i,isB,r)=>{ const p=(x/b[i]-1)*100; return '<td>'+Math.round(x)+(isB||Math.abs(p)<0.5?'':' <small style="color:'+(p>0?'#166534':'#b91c1c')+'">'+(p>0?'+':'')+p.toFixed(0)+'%</small>')+(drop[i]?' <small style="color:#64748b">('+r.dr[i].toFixed(2)+' s drop)</small>':'')+'</td>'; };
+  st.textContent='done \u2014 see the A/B card above the charts'; document.getElementById('abCard').style.display='';
+  out.innerHTML='<table class="trtbl"><tr><th>Regression (avg Mbps)</th>'+names.map(k=>'<th>'+k+'</th>').join('')+'</tr>'+
+    '<tr style="color:#5b21b6"><td style="text-align:left">genie</td>'+genie.map(g=>'<td>'+Math.round(g)+'</td>').join('')+'</tr>'+
+    rows.map((r,j)=>'<tr><td style="text-align:left">'+r.name+'</td>'+r.val.map((x,i)=>cell(x,i,j===0,r)).join('')+'</tr>').join('')+'</table>'+
+    '<div class="hint">320 MHz, 2 streams, Monte-Carlo, mean of '+n+' seeds. % = vs current FW. ZoharBadLog drops = the fitted real case with its trap moments (real log: 87 Mbps, 2.70 s drop); drop = 100 ms bins below '+thr.toFixed(0)+' Mbps. Clean high-SNR ceiling \u2248 90% of genie (A-MPDU overhead).</div>';
+}
 async function runAB(){
   const out=document.getElementById('abOut'), st=document.getElementById('abStatus'); let segs;
   if(SIM_MODE===3 && TRACE && traceSegsStale()) recreateFromTrace();
@@ -2061,15 +2180,19 @@ function drawTptCompare(){
   ctx.lineWidth=1; ctx.font='10px Segoe UI'; scnXAxis(ctx,xTo,H,10);
   ctx.save(); ctx.translate(12,plotT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillStyle='#475569'; ctx.textAlign='center'; ctx.fillText('Mbps',0,0); ctx.restore();
 }
+// Genie = best rate per step (PHY x (1-PER) x (1-loss at that BW), no MAC overhead): time-dominant rate + time-weighted avg tpt.
+function genieTxt(recs){ const m={}; let s=0,d=0;
+  for(const x of recs){ const k=rateTxt({mcs:x.bestMcs,nss:x.bestNss,bw:x.bestBw,gi:x.bestGi?0:3}); m[k]=(m[k]||0)+x.dt; s+=x.best*x.dt; d+=x.dt; }
+  const top=Object.keys(m).sort((a,b)=>m[b]-m[a])[0]; return top?' \u00b7 genie: '+top+', '+Math.round(d?s/d:0)+' Mbps':''; }
 function drawScnTpt(recs,total){
   const hint=document.getElementById('tptHint'), title=document.getElementById('tptTitle');
   if(hint && !hint.dataset.sim) hint.dataset.sim=hint.innerHTML;
   if(traceOn()){
-    title.textContent='0 \u00b7 Throughput \u2014 real log vs simulated FW vs fixes';
-    hint.innerHTML='<b style="color:#DB2777">Pink = real log</b>, <b style="color:#0071C5">blue = simulated current firmware</b>; dashed = the same simulation (same seed) with <b style="color:#16a34a">FIX 1</b> / <b style="color:#ea580c">FIX 2</b> / <b style="color:#7c3aed">FIX 3</b>. All averaged over 100 ms. The strips on top show <b>when each was stuck on the wider bandwidth</b> \u2014 that is where throughput drops. Vertical lines = search cycles of the real log (pink) and current FW (blue); dotted = blocked. Drag to zoom, double-click to reset.';
+    title.textContent='0 \u00b7 Throughput \u2014 real log vs simulated FW vs fixes'+genieTxt(TR_VARS?TR_VARS.base.recs:recs);
+    hint.innerHTML='<b style="color:#DB2777">Pink = real log</b>, <b style="color:#0071C5">blue = simulated current firmware</b>; dashed = the same simulation (same seed) with one fix each (FIX 1\u20139, toggle below). <b>Genie</b> (title) = the best possible rate for the fitted channel and its average throughput (PHY \u00d7 success, no MAC overhead). All averaged over 100 ms. The strips on top show <b>when each was stuck on the wider bandwidth</b> \u2014 that is where throughput drops. Vertical lines = search cycles of the real log (pink) and current FW (blue); dotted = blocked. Drag to zoom, double-click to reset.';
     drawTptCompare(); return;
   }
-  title.textContent='0 \u00b7 Throughput over time \u2014 achieved vs best'; hint.innerHTML=hint.dataset.sim;
+  title.textContent='0 \u00b7 Throughput over time \u2014 achieved vs best'+genieTxt(recs); hint.innerHTML=hint.dataset.sim;
   const c0=document.getElementById('scnTpt'); if(c0.height!==175) c0.height=175;
   const c=document.getElementById('scnTpt'),ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H); ctx.font='10px Segoe UI';
   const padL=48,padR=14,padT=16,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
@@ -2201,7 +2324,7 @@ upd();
 setSimMode(2,false);
 // ---- remember where the user was across refresh (F5) ----
 const LS_KEY='tlcPlayground.state.v1', LS_TRACE='tlcPlayground.trace.v1';
-const LS_CHECKS=['warm','mcOn','fix1','fix2','fix3','showReal','showFW','showF1','showF2','showF3','trOverlay','logLuck','psd'];
+const LS_CHECKS=['warm','mcOn','fix1','fix2','fix3','fix4','fix5','fix6','fix7','fix8','fix9','showReal','showFW','showF1','showF2','showF3','showF4','showF5','showF6','showF7','showF8','showF9','trOverlay','logLuck','psd'];
 const LS_VALUES=['segs','mcSeed','abSeeds','snr','intf','bw','ant','band','profile'];
 function saveState(){ try{
   const st={tab:CUR_TAB, sub:CUR_SUB, mode:SIM_MODE, scroll:window.scrollY, ck:{}, val:{}};

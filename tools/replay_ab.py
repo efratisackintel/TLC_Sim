@@ -28,7 +28,8 @@ VARIANTS = [
     ("+ FIX 1 confirm wider BW", dict(fw=True, wide_confirm=True)),
     ("+ FIX 2 escape MCS-0 floor", dict(fw=True, floor_escape=True)),
     ("+ FIX 3 wider-BW backoff", dict(fw=True, wide_backoff=True)),
-    ("All 3 fixes", dict(fw=True, wide_confirm=True, floor_escape=True, wide_backoff=True)),
+    ("+ FIX 7 CTS guard", dict(fw=True, cts_guard=True)),
+    ("All simulated fixes", dict(fw=True, wide_confirm=True, floor_escape=True, wide_backoff=True, cts_guard=True)),
 ]
 
 
